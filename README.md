@@ -26,11 +26,30 @@
 
 ### Bước 1: Chuẩn bị mã nguồn và mô hình
 1. Clone hoặc tải dự án này về máy của bạn.
-2. Tạo một thư mục tên là `khanhtts_model` ở thư mục gốc của dự án (nếu chưa có).
-3. Đặt các tệp mô hình **OmniVoice** (ví dụ: `model.safetensors`, `config.json`, v.v.) vào bên trong thư mục `khanhtts_model/`.
+2. Tải mô hình **KhanhTTS-OmniVoice** từ Hugging Face vào thư mục `khanhtts_model` bằng một trong hai cách dưới đây:
+
+#### Cách A: Sử dụng `huggingface-cli` (Khuyên dùng - nhanh và đơn giản)
+Cách này không cần cài đặt Git LFS. Bạn có thể thực hiện sau khi tạo môi trường ảo ở Bước 3, hoặc chạy trực tiếp bằng python:
+```bash
+# Cài đặt thư viện tải từ Hugging Face
+pip install huggingface_hub
+
+# Tải toàn bộ mô hình về thư mục khanhtts_model
+huggingface-cli download kjanh/KhanhTTS-OmniVoice --local-dir khanhtts_model
+```
+
+#### Cách B: Sử dụng `git clone` (Yêu cầu cài đặt Git LFS)
+Nếu bạn thích dùng Git, hãy đảm bảo đã cài đặt [Git LFS](https://git-lfs.com/):
+```bash
+# Khởi tạo Git LFS (chỉ cần làm một lần)
+git lfs install
+
+# Clone repository của mô hình vào thư mục khanhtts_model
+git clone https://huggingface.co/kjanh/KhanhTTS-OmniVoice khanhtts_model
+```
 
 > [!NOTE]
-> Thư mục `khanhtts_model` chứa các file trọng số mô hình lớn (~3GB) nên mặc định đã bị bỏ qua (ignored) khi push lên GitHub để tránh quá tải dung lượng.
+> Thư mục `khanhtts_model` chứa các file trọng số mô hình lớn (~3GB) nên mặc định đã bị bỏ qua (ignored) trong file `.gitignore` để tránh đẩy lên GitHub của bạn.
 
 ### Bước 2: Cài đặt FFmpeg
 - **macOS** (Sử dụng Homebrew):
