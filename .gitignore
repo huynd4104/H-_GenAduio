@@ -3,3 +3,5 @@ tts_env/
 __pycache__/
 *.pyc
 node_modules/
+khanhtts_model/
+Kết quả/

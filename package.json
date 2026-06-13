@@ -1,0 +1,8 @@
+{
+  "name": "khanhtts-studio",
+  "version": "1.0.0",
+  "description": "KhanhTTS Voice Cloning Studio Local Web App",
+  "scripts": {
+    "dev": "./run_web_app.sh"
+  }
+}
