@@ -48,8 +48,6 @@ git lfs install
 git clone https://huggingface.co/kjanh/KhanhTTS-OmniVoice khanhtts_model
 ```
 
-> [!NOTE]
-> Thư mục `khanhtts_model` chứa các file trọng số mô hình lớn (~3GB) nên mặc định đã bị bỏ qua (ignored) trong file `.gitignore` để tránh đẩy lên GitHub của bạn.
 
 ### Bước 2: Cài đặt FFmpeg
 - **macOS** (Sử dụng Homebrew):
