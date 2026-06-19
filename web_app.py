@@ -507,9 +507,20 @@ HTML_CONTENT = """
             </div>
 
             <div class="form-group">
-                <label>Tốc độ đọc: <span id="speed-val">1.0</span>x</label>
+                <label>Tốc độ đọc: <span id="speed-val">1.00</span>x</label>
                 <div style="display: flex; align-items: center; height: 100%; padding-top: 0.25rem;">
-                    <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0" style="width: 100%; accent-color: var(--accent);">
+                    <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.05" value="1.0" style="width: 100%; accent-color: var(--accent);">
+                </div>
+            </div>
+
+            <div class="row" style="grid-template-columns: 1.2fr 0.8fr; align-items: center; gap: 1rem; margin-top: -0.5rem;">
+                <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem; height: 100%;">
+                    <input type="checkbox" id="enable-numbering" style="width: 1.2rem; height: 1.2rem; accent-color: var(--accent); cursor: pointer;">
+                    <label for="enable-numbering" style="cursor: pointer; margin: 0; text-transform: none; font-size: 0.85rem; font-weight: 500;">Đánh số thứ tự file</label>
+                </div>
+                <div class="form-group" id="start-number-group" style="display: none; height: 100%;">
+                    <label for="start-number" style="font-size: 0.75rem;">Số bắt đầu</label>
+                    <input type="number" id="start-number" value="1" min="0" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.5rem 0.75rem; color: var(--text-primary); outline: none; width: 100%;">
                 </div>
             </div>
 
@@ -599,9 +610,20 @@ HTML_CONTENT = """
         const speedVal = document.getElementById('speed-val');
         const searchFiles = document.getElementById('search-files');
         const btnClearAll = document.getElementById('btn-clear-all');
+        const enableNumberingCheckbox = document.getElementById('enable-numbering');
+        const startNumberGroup = document.getElementById('start-number-group');
+        const startNumberInput = document.getElementById('start-number');
 
         speedSlider.oninput = () => {
-            speedVal.textContent = speedSlider.value;
+            speedVal.textContent = parseFloat(speedSlider.value).toFixed(2);
+        };
+
+        enableNumberingCheckbox.onchange = () => {
+            if (enableNumberingCheckbox.checked) {
+                startNumberGroup.style.display = 'flex';
+            } else {
+                startNumberGroup.style.display = 'none';
+            }
         };
 
         btnClearAll.onclick = async () => {
@@ -913,7 +935,9 @@ HTML_CONTENT = """
                 folder: folderPathInput.value.trim(),
                 ref_audio: sampleSelect.value,
                 ref_text: refTextInput.value,
-                speed: parseFloat(speedSlider.value)
+                speed: parseFloat(speedSlider.value),
+                enable_numbering: enableNumberingCheckbox.checked,
+                start_number: enableNumberingCheckbox.checked ? parseInt(startNumberInput.value) + currentIndex : 1
             };
 
             try {
@@ -1202,6 +1226,8 @@ class GenerateRequest(BaseModel):
     ref_audio: str
     ref_text: str
     speed: float = 1.0
+    enable_numbering: bool = False
+    start_number: int = 1
 
 @app.post("/api/generate")
 async def generate_voice(req: GenerateRequest):
@@ -1230,6 +1256,9 @@ async def generate_voice(req: GenerateRequest):
                 yield json.dumps({"status": "processing", "index": idx, "total": total, "text": text}) + "\n"
                 
                 ten_file_sach = clean_filename(text)
+                if req.enable_numbering:
+                    current_num = req.start_number + (idx - 1)
+                    ten_file_sach = f"{current_num}_{ten_file_sach}"
                 file_output = os.path.join(target_dir, f"{ten_file_sach}.wav")
                 
                 if os.path.exists(file_output):
@@ -1242,7 +1271,7 @@ async def generate_voice(req: GenerateRequest):
                             break
                         counter += 1
                 
-                cau_co_moi = f",, {text}"
+                cau_co_moi = text
                 
                 loop = asyncio.get_event_loop()
                 def run_gen():
