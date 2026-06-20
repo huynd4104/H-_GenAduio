@@ -594,7 +594,7 @@ HTML_CONTENT = """
 </head>
 <body>
     <header>
-        <h1>KhanhTTS OmniVoice Studio</h1>
+        <h1>Hẹ Hẹ hẹ</h1>
         <p>Ứng dụng nhân bản giọng nói và tạo âm thanh hàng loạt trực quan</p>
     </header>
 
