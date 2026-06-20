@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydub import AudioSegment
 from omnivoice import OmniVoice
+import librosa
 
 app = FastAPI(title="KhanhTTS OmniVoice Studio")
 
@@ -456,6 +457,139 @@ HTML_CONTENT = """
             gap: 1rem;
             width: 100%;
         }
+
+        .tabs-nav-wrapper {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 1rem;
+            background: rgba(255, 255, 255, 0.02);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            gap: 1rem;
+        }
+
+        .tabs-headers {
+            display: flex;
+            gap: 0.5rem;
+            overflow-x: auto;
+            flex: 1;
+            padding-bottom: 2px;
+        }
+
+        .tabs-headers::-webkit-scrollbar {
+            height: 4px;
+        }
+        .tabs-headers::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+
+        .tab-header-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tab-header-btn.active {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            border-color: transparent;
+            color: white;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+
+        .tab-header-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+        }
+
+        .tab-close-btn {
+            font-size: 1.1rem;
+            font-weight: bold;
+            line-height: 1;
+            opacity: 0.6;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            color: inherit;
+            padding: 0px 4px;
+            margin-left: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .tab-close-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            opacity: 1;
+        }
+
+        .btn-add-tab {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .btn-add-tab:hover {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: var(--success);
+        }
+
+        .btn-run-all {
+            background: linear-gradient(135deg, #ec4899 0%, #d946ef 100%);
+            border: none;
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3);
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .btn-run-all:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(236, 72, 153, 0.5);
+        }
+        
+        .btn-run-all.running {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        .tab-content-panel {
+            display: none !important;
+        }
+        
+        .tab-content-panel.active {
+            display: grid !important;
+        }
     </style>
 </head>
 <body>
@@ -464,109 +598,14 @@ HTML_CONTENT = """
         <p>Ứng dụng nhân bản giọng nói và tạo âm thanh hàng loạt trực quan</p>
     </header>
 
-    <div class="container">
-        <div class="panel">
-            <div class="form-group">
-                <label for="sentences">Danh sách câu nói cần gen (Mỗi câu một dòng)</label>
-                <textarea id="sentences" placeholder="Ví dụ:&#10;Chưa đúng rồi, con chọn lại nhé.&#10;Tuyệt vời! Con giỏi quá."></textarea>
-            </div>
+    <div class="tabs-nav-wrapper">
+        <div id="tabs-headers" class="tabs-headers"></div>
+        <button id="btn-add-tab" class="btn-add-tab" onclick="addNewTab()">➕ Thêm Tab mới</button>
+        <button id="btn-run-all" class="btn-run-all" onclick="runAllTabs()">🚀 Chạy tất cả các Tab</button>
+    </div>
 
-            <div class="form-group">
-                <label for="folder-select">Thư mục lưu kết quả</label>
-                <select id="folder-select" style="margin-bottom: 0.5rem;">
-                    <option value="ROOT">Chọn thư mục có sẵn...</option>
-                </select>
-                <div style="display: flex; gap: 0.5rem; width: 100%;">
-                    <input type="text" id="folder-path" placeholder="Đường dẫn thư mục lưu..." style="flex: 1;">
-                    <button class="btn-secondary" id="btn-browse-folder" style="white-space: nowrap; min-width: 110px;">🔍 Finder...</button>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="form-group">
-                    <label for="sample-select">File mẫu (Reference Audio)</label>
-                    <select id="sample-select" style="margin-bottom: 0.5rem;">
-                        <!-- Loaded dynamically -->
-                    </select>
-                    <!-- Audio player để nghe thử file mẫu -->
-                    <audio id="sample-audio-player" controls style="height: 32px; width: 100%;"></audio>
-                </div>
-                <div class="form-group">
-                    <label>Tải lên file mẫu mới</label>
-                    <div class="upload-area">
-                        <button class="btn-secondary" onclick="document.getElementById('file-uploader').click()" style="width: 100%; white-space: nowrap; margin-bottom: 0.5rem;">📁 Chọn tệp mẫu</button>
-                        <input type="file" id="file-uploader" accept=".mp3,.wav" onchange="uploadSampleFile(this)">
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="ref-text">Nội dung chính xác của file mẫu</label>
-                <input type="text" id="ref-text" value="Tuyệt vời, đây là số 3 nhé!">
-                <span id="upload-status" style="font-size: 0.85rem; color: var(--success); min-height: 1.2rem; display: block; margin-top: -0.25rem;"></span>
-            </div>
-
-            <div class="form-group">
-                <label>Tốc độ đọc: <span id="speed-val">1.00</span>x</label>
-                <div style="display: flex; align-items: center; height: 100%; padding-top: 0.25rem;">
-                    <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.05" value="1.0" style="width: 100%; accent-color: var(--accent);">
-                </div>
-            </div>
-
-            <div class="row" style="grid-template-columns: 1.2fr 0.8fr; align-items: center; gap: 1rem; margin-top: -0.5rem;">
-                <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem; height: 100%;">
-                    <input type="checkbox" id="enable-numbering" style="width: 1.2rem; height: 1.2rem; accent-color: var(--accent); cursor: pointer;">
-                    <label for="enable-numbering" style="cursor: pointer; margin: 0; text-transform: none; font-size: 0.85rem; font-weight: 500;">Đánh số thứ tự file</label>
-                </div>
-                <div class="form-group" id="start-number-group" style="display: none; height: 100%;">
-                    <label for="start-number" style="font-size: 0.75rem;">Số bắt đầu</label>
-                    <input type="number" id="start-number" value="1" min="0" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.5rem 0.75rem; color: var(--text-primary); outline: none; width: 100%;">
-                </div>
-            </div>
-
-            <button id="btn-generate" class="btn">
-                <span>🚀 Bắt đầu tạo hàng loạt</span>
-            </button>
-
-            <!-- Control buttons during generation -->
-            <div id="control-group" class="control-group">
-                <button id="btn-pause" class="btn" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
-                    ⏸️ Tạm dừng
-                </button>
-                <button id="btn-stop" class="btn" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">
-                    ⏹️ Dừng hẳn
-                </button>
-            </div>
-
-            <!-- Progress Visualizer -->
-            <div id="progress-container" class="progress-container">
-                <div class="progress-header">
-                    <span id="progress-label">Đang chuẩn bị...</span>
-                    <span id="progress-percentage">0%</span>
-                </div>
-                <div class="progress-bar-bg">
-                    <div id="progress-bar-fill" class="progress-bar-fill"></div>
-                </div>
-                <div id="status-text" class="status-text">Đang khởi tạo mô hình...</div>
-            </div>
-        </div>
-
-        <!-- Panel bên phải: Quản lý Audio -->
-        <div class="panel">
-            <div class="form-group">
-                <div class="manager-header">
-                    <label>Các file đã tạo trong thư mục</label>
-                    <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="loadFiles()">Reset</button>
-                        <button id="btn-clear-all" class="btn-sm-danger" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; border-color: rgba(239, 68, 68, 0.4);">Delete</button>
-                    </div>
-                </div>
-                <input type="text" id="search-files" placeholder="🔍 Tìm kiếm file nhanh..." style="margin-top: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.85rem;">
-                <div id="file-list-container" class="file-list">
-                    <div class="empty-state">Nhập thư mục để tải danh sách file âm thanh.</div>
-                </div>
-            </div>
-        </div>
+    <div id="tabs-container-wrapper" style="width: 100%; max-width: 1200px;">
+        <!-- Tab content panels will be loaded dynamically here -->
     </div>
 
     <!-- Dialog xác nhận dừng -->
@@ -584,128 +623,660 @@ HTML_CONTENT = """
     </dialog>
 
     <script>
-        const sentencesInput = document.getElementById('sentences');
-        const folderSelect = document.getElementById('folder-select');
-        const folderPathInput = document.getElementById('folder-path');
-        const sampleSelect = document.getElementById('sample-select');
-        const refTextInput = document.getElementById('ref-text');
-        const btnGenerate = document.getElementById('btn-generate');
-        const progressContainer = document.getElementById('progress-container');
-        const progressLabel = document.getElementById('progress-label');
-        const progressPercentage = document.getElementById('progress-percentage');
-        const progressBarFill = document.getElementById('progress-bar-fill');
-        const statusText = document.getElementById('status-text');
-        const fileListContainer = document.getElementById('file-list-container');
-        const uploadStatus = document.getElementById('upload-status');
-        const btnBrowseFolder = document.getElementById('btn-browse-folder');
-        const sampleAudioPlayer = document.getElementById('sample-audio-player');
+        let tabs = []; // Array of tab data
+        let activeTabId = null;
+        let isRunningAll = false;
+        let runAllQueue = [];
+        let tabToStop = null;
+        
+        let globalPresetFolders = [];
+        let globalSamples = [];
+        let globalBaseDir = "";
+        
+        let tabLoadedFiles = {}; // tabId -> list of files
 
-        const controlGroup = document.getElementById('control-group');
-        const btnPause = document.getElementById('btn-pause');
-        const btnStop = document.getElementById('btn-stop');
-        const confirmDialog = document.getElementById('confirm-dialog');
-        const btnConfirmNo = document.getElementById('btn-confirm-no');
-        const btnConfirmYes = document.getElementById('btn-confirm-yes');
-        const speedSlider = document.getElementById('speed-slider');
-        const speedVal = document.getElementById('speed-val');
-        const searchFiles = document.getElementById('search-files');
-        const btnClearAll = document.getElementById('btn-clear-all');
-        const enableNumberingCheckbox = document.getElementById('enable-numbering');
-        const startNumberGroup = document.getElementById('start-number-group');
-        const startNumberInput = document.getElementById('start-number');
-
-        speedSlider.oninput = () => {
-            speedVal.textContent = parseFloat(speedSlider.value).toFixed(2);
-        };
-
-        enableNumberingCheckbox.onchange = () => {
-            if (enableNumberingCheckbox.checked) {
-                startNumberGroup.style.display = 'flex';
-            } else {
-                startNumberGroup.style.display = 'none';
+        function requestNotificationPermission() {
+            if ("Notification" in window) {
+                if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+                    Notification.requestPermission();
+                }
             }
-        };
-
-        btnClearAll.onclick = async () => {
-            const folder = folderPathInput.value.trim();
-            if (!folder) return;
-            if (confirm("⚠️ Bạn có chắc chắn muốn XÓA TẤT CẢ các file âm thanh .wav trong thư mục này không? Thao tác này không thể hoàn tác.")) {
+        }
+        
+        function sendDesktopNotification(title, body) {
+            if ("Notification" in window && Notification.permission === "granted") {
                 try {
-                    const res = await fetch(`/api/clear-all?folder=${encodeURIComponent(folder)}`, { method: 'DELETE' });
-                    const result = await res.json();
-                    if (result.success) {
-                        loadFiles();
-                    } else {
-                        alert("Lỗi khi xóa tất cả: " + result.error);
-                    }
-                } catch (err) {
-                    alert("Lỗi kết nối: " + err);
+                    new Notification(title, { body: body });
+                } catch (e) {
+                    console.error("Lỗi hiển thị thông báo:", e);
                 }
-            }
-        };
-
-        let loadedFiles = [];
-        let defaultBaseDir = "";
-        let sentenceList = [];
-        let currentIndex = 0;
-        let totalSentences = 0;
-        let isPaused = false;
-        let isStopped = false;
-
-        // Load initial folders and samples list
-        async function loadMetadata() {
-            try {
-                const res = await fetch('/api/metadata');
-                const data = await res.json();
-                
-                defaultBaseDir = data.base_dir;
-                
-                // Load preset folders list
-                folderSelect.innerHTML = '';
-                data.folders.forEach(folder => {
-                    const opt = document.createElement('option');
-                    opt.value = folder.path;
-                    opt.textContent = folder.name;
-                    folderSelect.appendChild(opt);
-                });
-
-                // Set default folder path to 'Kết quả' folder if empty and exists
-                if(!folderPathInput.value) {
-                    const ketQuaFolder = data.folders.find(f => f.name === "Kết quả");
-                    if (ketQuaFolder) {
-                        folderPathInput.value = ketQuaFolder.path;
-                        folderSelect.value = ketQuaFolder.path;
-                    } else if (data.folders.length > 0) {
-                        folderPathInput.value = data.folders[0].path;
-                        folderSelect.value = data.folders[0].path;
-                    } else {
-                        folderPathInput.value = defaultBaseDir;
-                    }
-                }
-
-                // Load samples
-                const currentSample = sampleSelect.value;
-                sampleSelect.innerHTML = '';
-                data.samples.forEach(sample => {
-                    const opt = document.createElement('option');
-                    opt.value = sample.path;
-                    opt.textContent = sample.name;
-                    if (sample.name === 'sample.mp3') opt.selected = true;
-                    sampleSelect.appendChild(opt);
-                });
-                
-                if (currentSample) {
-                    sampleSelect.value = currentSample;
-                }
-                
-                // Cập nhật nguồn âm thanh mẫu ban đầu
-                updateSampleAudio();
-            } catch (err) {
-                console.error("Lỗi khi tải metadata:", err);
             }
         }
 
-        async function transcribeSample(path) {
+        const confirmDialog = document.getElementById('confirm-dialog');
+        const btnConfirmNo = document.getElementById('btn-confirm-no');
+        const btnConfirmYes = document.getElementById('btn-confirm-yes');
+        
+        btnConfirmNo.onclick = () => {
+            confirmDialog.close();
+            tabToStop = null;
+        };
+        
+        btnConfirmYes.onclick = () => {
+            confirmDialog.close();
+            if (tabToStop) {
+                stopGeneration(tabToStop);
+                tabToStop = null;
+            }
+        };
+
+        async function loadMetadataGlobal() {
+            try {
+                const res = await fetch('/api/metadata');
+                const data = await res.json();
+                globalBaseDir = data.base_dir;
+                globalPresetFolders = data.folders || [];
+                globalSamples = data.samples || [];
+            } catch (err) {
+                console.error("Lỗi khi tải metadata toàn cục:", err);
+            }
+        }
+
+        function getPrefixForIndex(startValue, index) {
+            if (!startValue) return String(index + 1);
+            const match = startValue.match(/^(.*?)(\\d+)$/);
+            if (match) {
+                const prefix = match[1];
+                const numStr = match[2];
+                const startNum = parseInt(numStr, 10);
+                const currentNum = startNum + index;
+                const paddedNum = String(currentNum).padStart(numStr.length, '0');
+                return prefix + paddedNum;
+            } else {
+                if (index === 0) return startValue;
+                return startValue + "_" + (index + 1);
+            }
+        }
+
+        function syncTabCustomNumbers(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const sentencesInput = document.getElementById(`sentences-${tabId}`);
+            if (!sentencesInput) return;
+            
+            const rawSentences = sentencesInput.value.trim();
+            const newLines = rawSentences.split("\\n").map(s => s.trim()).filter(s => s);
+            
+            // Get previous lines from tab state
+            const oldLines = tab.state.sentenceList || [];
+            const oldNumbers = tab.customNumbers || [];
+            const newNumbers = [];
+            const usedOldIndices = new Set();
+            
+            for (let i = 0; i < newLines.length; i++) {
+                const newLine = newLines[i];
+                // 1. Try to match same index first
+                if (oldLines[i] === newLine && !usedOldIndices.has(i)) {
+                    newNumbers.push(oldNumbers[i] || "");
+                    usedOldIndices.add(i);
+                    continue;
+                }
+                
+                // 2. Try to find the same content elsewhere
+                let foundIndex = -1;
+                for (let j = 0; j < oldLines.length; j++) {
+                    if (oldLines[j] === newLine && !usedOldIndices.has(j)) {
+                        foundIndex = j;
+                        break;
+                    }
+                }
+                
+                if (foundIndex !== -1) {
+                    newNumbers.push(oldNumbers[foundIndex] || "");
+                    usedOldIndices.add(foundIndex);
+                } else {
+                    newNumbers.push(null);
+                }
+            }
+            
+            // Fill default prefixes
+            for (let i = 0; i < newNumbers.length; i++) {
+                if (newNumbers[i] === null || newNumbers[i] === "") {
+                    let defaultVal = "";
+                    if (i > 0 && newNumbers[i - 1]) {
+                        const prevVal = newNumbers[i - 1];
+                        const match = prevVal.match(/^(.*?)(\\d+)$/);
+                        if (match) {
+                            const prefix = match[1];
+                            const numStr = match[2];
+                            const nextNum = parseInt(numStr, 10) + 1;
+                            const paddedNum = String(nextNum).padStart(numStr.length, '0');
+                            defaultVal = prefix + paddedNum;
+                        } else {
+                            defaultVal = String(i + 1);
+                        }
+                    } else {
+                        defaultVal = String(i + 1);
+                    }
+                    newNumbers[i] = defaultVal;
+                }
+            }
+            
+            tab.customNumbers = newNumbers;
+            tab.state.sentenceList = newLines;
+            
+            saveAllTabs();
+            
+            // Render custom numbering list UI
+            const customListEl = document.getElementById(`custom-numbering-list-${tabId}`);
+            if (customListEl) {
+                customListEl.innerHTML = "";
+                if (newLines.length === 0) {
+                    customListEl.innerHTML = `<div style="font-size: 0.85rem; color: var(--text-secondary); text-align: center; padding: 1rem;">Nhập danh sách câu để tùy chỉnh số thứ tự.</div>`;
+                    return;
+                }
+                
+                newLines.forEach((line, index) => {
+                    const item = document.createElement("div");
+                    item.className = "custom-number-item";
+                    item.style.cssText = "display: flex; align-items: center; justify-content: space-between; gap: 1rem; background: rgba(255, 255, 255, 0.02); padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.03);";
+                    
+                    const label = document.createElement("span");
+                    label.className = "custom-number-sentence";
+                    label.style.cssText = "font-size: 0.85rem; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; flex: 1;";
+                    label.textContent = `${index + 1}. ${line}`;
+                    label.title = line;
+                    
+                    const input = document.createElement("input");
+                    input.type = "text";
+                    input.className = "custom-number-input-field";
+                    input.value = newNumbers[index] || "";
+                    input.style.cssText = "width: 100px; padding: 0.35rem 0.6rem; font-size: 0.85rem; border-radius: 6px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); color: var(--text-primary); text-align: center; outline: none;";
+                    
+                    input.addEventListener("input", () => {
+                        tab.customNumbers[index] = input.value;
+                        saveAllTabs();
+                    });
+                    
+                    item.appendChild(label);
+                    item.appendChild(input);
+                    customListEl.appendChild(item);
+                });
+            }
+        }
+
+        async function initTabs() {
+            await loadMetadataGlobal();
+            
+            const savedTabsStr = localStorage.getItem('tts_multi_tabs');
+            const savedActiveTabId = localStorage.getItem('tts_active_tab_id');
+            
+            if (savedTabsStr) {
+                try {
+                    const parsed = JSON.parse(savedTabsStr);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        tabs = parsed.map(t => {
+                            // Convert old structures
+                            let method = t.numberingMethod;
+                            if (method === undefined) {
+                                method = t.enableNumbering ? 'auto' : 'none';
+                            }
+                            let sNum = t.startNumber;
+                            if (sNum === undefined) {
+                                sNum = '001';
+                            } else {
+                                sNum = String(sNum);
+                            }
+                            return {
+                                ...t,
+                                numberingMethod: method,
+                                startNumber: sNum,
+                                customNumbers: Array.isArray(t.customNumbers) ? t.customNumbers : [],
+                                state: {
+                                    sentenceList: [],
+                                    currentIndex: 0,
+                                    totalSentences: 0,
+                                    isPaused: false,
+                                    isStopped: false,
+                                    isGenerating: false
+                                }
+                            };
+                        });
+                    }
+                } catch (e) {
+                    console.error("Lỗi parse local storage:", e);
+                }
+            }
+            
+            if (tabs.length === 0) {
+                const defaultTab = {
+                    id: 'tab_default',
+                    name: 'Cửa sổ 1',
+                    sentences: '',
+                    folderPath: '',
+                    selectedSample: '',
+                    refText: '',
+                    speed: 1.0,
+                    speedMethod: 'model',
+                    numberingMethod: 'none',
+                    startNumber: '001',
+                    customNumbers: [],
+                    state: {
+                        sentenceList: [],
+                        currentIndex: 0,
+                        totalSentences: 0,
+                        isPaused: false,
+                        isStopped: false,
+                        isGenerating: false
+                    }
+                };
+                tabs.push(defaultTab);
+                saveAllTabs();
+            }
+            
+            const wrapper = document.getElementById('tabs-container-wrapper');
+            wrapper.innerHTML = '';
+            
+            tabs.forEach(tab => {
+                renderTabPanel(tab);
+                populateTabDropdowns(tab.id);
+                // Render custom list if the method is custom
+                if (tab.numberingMethod === 'custom') {
+                    syncTabCustomNumbers(tab.id);
+                }
+            });
+            
+            renderTabHeaders();
+            
+            if (savedActiveTabId && tabs.some(t => t.id === savedActiveTabId)) {
+                selectTab(savedActiveTabId);
+            } else {
+                selectTab(tabs[0].id);
+            }
+        }
+
+        function saveAllTabs() {
+            const tabsToSave = tabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                sentences: t.sentences,
+                folderPath: t.folderPath,
+                selectedSample: t.selectedSample,
+                refText: t.refText,
+                speed: t.speed,
+                speedMethod: t.speedMethod,
+                numberingMethod: t.numberingMethod,
+                startNumber: t.startNumber,
+                customNumbers: t.customNumbers
+            }));
+            localStorage.setItem('tts_multi_tabs', JSON.stringify(tabsToSave));
+            localStorage.setItem('tts_active_tab_id', activeTabId);
+        }
+
+        function selectTab(tabId) {
+            activeTabId = tabId;
+            saveAllTabs();
+            
+            document.querySelectorAll('.tab-header-btn').forEach(btn => {
+                if (btn.dataset.id === tabId) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            document.querySelectorAll('.tab-content-panel').forEach(panel => {
+                if (panel.id === `panel-${tabId}`) {
+                    panel.classList.add('active');
+                } else {
+                    panel.classList.remove('active');
+                }
+            });
+            
+            loadFilesForTab(tabId);
+        }
+
+        function addNewTab() {
+            const tabNum = tabs.length + 1;
+            const newTab = {
+                id: 'tab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                name: `Cửa sổ ${tabNum}`,
+                sentences: '',
+                folderPath: '',
+                selectedSample: '',
+                refText: '',
+                speed: 1.0,
+                speedMethod: 'model',
+                numberingMethod: 'none',
+                startNumber: '001',
+                customNumbers: [],
+                state: {
+                    sentenceList: [],
+                    currentIndex: 0,
+                    totalSentences: 0,
+                    isPaused: false,
+                    isStopped: false,
+                    isGenerating: false
+                }
+            };
+            
+            tabs.push(newTab);
+            saveAllTabs();
+            
+            renderTabHeaders();
+            renderTabPanel(newTab);
+            populateTabDropdowns(newTab.id);
+            
+            selectTab(newTab.id);
+        }
+
+        function closeTab(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            // Confirm deletion
+            if (!confirm(`⚠️ Bạn có chắc chắn muốn xóa "${tab.name}" không? Tất cả các thiết lập của cửa sổ này sẽ bị mất.`)) {
+                return;
+            }
+            
+            if (tab.state && tab.state.isGenerating) {
+                tab.state.isStopped = true;
+            }
+            
+            const panel = document.getElementById(`panel-${tabId}`);
+            if (panel) panel.remove();
+            
+            tabs = tabs.filter(t => t.id !== tabId);
+            
+            // Reset tab names sequentially
+            tabs.forEach((t, index) => {
+                t.name = `Cửa sổ ${index + 1}`;
+            });
+            
+            saveAllTabs();
+            
+            if (activeTabId === tabId && tabs.length > 0) {
+                selectTab(tabs[tabs.length - 1].id);
+            }
+            
+            renderTabHeaders();
+        }
+
+        function renderTabHeaders() {
+            const container = document.getElementById('tabs-headers');
+            container.innerHTML = '';
+            
+            tabs.forEach(tab => {
+                const btn = document.createElement('button');
+                btn.className = `tab-header-btn ${tab.id === activeTabId ? 'active' : ''}`;
+                btn.dataset.id = tab.id;
+                btn.onclick = () => selectTab(tab.id);
+                
+                const label = document.createElement('span');
+                label.textContent = tab.name;
+                btn.appendChild(label);
+                
+                if (tabs.length > 1) {
+                    const closeBtn = document.createElement('span');
+                    closeBtn.className = 'tab-close-btn';
+                    closeBtn.textContent = '×';
+                    closeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        closeTab(tab.id);
+                    };
+                    btn.appendChild(closeBtn);
+                }
+                
+                container.appendChild(btn);
+            });
+        }
+
+        function renderTabPanel(tab) {
+            const wrapper = document.getElementById('tabs-container-wrapper');
+            const panelHtml = `
+            <div class="container tab-content-panel" id="panel-${tab.id}">
+                <!-- Left Panel: Configurations -->
+                <div class="panel">
+                    <div class="form-group">
+                        <label for="sentences-${tab.id}">Danh sách câu nói cần gen (Mỗi câu một dòng)</label>
+                        <textarea id="sentences-${tab.id}" class="sentences-textarea" placeholder="Ví dụ:&#10;Chưa đúng rồi, con chọn lại nhé.&#10;Tuyệt vời! Con giỏi quá.">${tab.sentences || ''}</textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="folder-select-${tab.id}">Thư mục lưu kết quả</label>
+                        <select id="folder-select-${tab.id}" class="folder-select" style="margin-bottom: 0.5rem;">
+                            <option value="ROOT">Chọn thư mục có sẵn...</option>
+                        </select>
+                        <div style="display: flex; gap: 0.5rem; width: 100%;">
+                            <input type="text" id="folder-path-${tab.id}" class="folder-path-input" placeholder="Đường dẫn thư mục lưu..." value="${tab.folderPath || ''}" style="flex: 1;">
+                            <button class="btn-secondary btn-browse-folder" id="btn-browse-folder-${tab.id}" style="white-space: nowrap; min-width: 110px;">🔍 Finder...</button>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="form-group">
+                            <label for="sample-select-${tab.id}">File mẫu (Reference Audio)</label>
+                            <select id="sample-select-${tab.id}" class="sample-select" style="margin-bottom: 0.5rem;">
+                                <!-- Loaded dynamically -->
+                            </select>
+                            <!-- Audio player để nghe thử file mẫu -->
+                            <audio id="sample-audio-player-${tab.id}" class="sample-audio-player" controls style="height: 32px; width: 100%; display: none;"></audio>
+                        </div>
+                        <div class="form-group">
+                            <label>Tải lên file mẫu mới</label>
+                            <div class="upload-area">
+                                <button class="btn-secondary" onclick="document.getElementById('file-uploader-${tab.id}').click()" style="width: 100%; white-space: nowrap; margin-bottom: 0.5rem;">📁 Chọn tệp mẫu</button>
+                                <input type="file" id="file-uploader-${tab.id}" class="file-uploader" accept=".mp3,.wav" style="display:none;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ref-text-${tab.id}">Nội dung chính xác của file mẫu</label>
+                        <input type="text" id="ref-text-${tab.id}" class="ref-text-input" value="${tab.refText || 'Tuyệt vời, đây là số 3 nhé!'}">
+                        <span id="upload-status-${tab.id}" class="upload-status" style="font-size: 0.85rem; color: var(--success); min-height: 1.2rem; display: block; margin-top: -0.25rem;"></span>
+                    </div>
+
+                    <div class="row" style="grid-template-columns: 1fr 1.2fr; gap: 1rem; align-items: center;">
+                        <div class="form-group">
+                            <label>Tốc độ đọc: <span id="speed-val-${tab.id}" class="speed-val">${parseFloat(tab.speed).toFixed(2)}</span>x</label>
+                            <div style="display: flex; align-items: center; height: 100%; padding-top: 0.25rem;">
+                                <input type="range" id="speed-slider-${tab.id}" class="speed-slider" min="0.5" max="2.0" step="0.05" value="${tab.speed || 1.0}" style="width: 100%; accent-color: var(--accent);">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="speed-method-${tab.id}">Phương pháp tinh chỉnh</label>
+                            <select id="speed-method-${tab.id}" class="speed-method-select">
+                                <option value="model" ${tab.speedMethod === 'model' ? 'selected' : ''}>AI Tự nhiên (Model-based)</option>
+                                <option value="dsp" ${tab.speedMethod === 'dsp' ? 'selected' : ''}>Chính xác (DSP-based)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row" style="grid-template-columns: 1fr 1fr; align-items: center; gap: 1rem; margin-top: -0.5rem;">
+                        <div class="form-group">
+                            <label for="numbering-method-${tab.id}">Đánh số thứ tự file</label>
+                            <select id="numbering-method-${tab.id}" class="numbering-method-select">
+                                <option value="none" ${tab.numberingMethod === 'none' ? 'selected' : ''}>Không đánh số</option>
+                                <option value="auto" ${tab.numberingMethod === 'auto' ? 'selected' : ''}>Tự động tăng dần</option>
+                                <option value="custom" ${tab.numberingMethod === 'custom' ? 'selected' : ''}>Tự đánh số (Tùy chỉnh)</option>
+                            </select>
+                        </div>
+                        <div class="form-group start-number-group" id="start-number-group-${tab.id}" style="display: ${tab.numberingMethod === 'auto' ? 'flex' : 'none'}; height: 100%;">
+                            <label for="start-number-${tab.id}">Số bắt đầu</label>
+                            <input type="text" id="start-number-${tab.id}" class="start-number-input" value="${tab.startNumber !== undefined ? tab.startNumber : '001'}" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.75rem 1rem; color: var(--text-primary); outline: none; width: 100%;">
+                        </div>
+                    </div>
+
+                    <div id="custom-numbering-container-${tab.id}" class="form-group custom-numbering-container" style="display: ${tab.numberingMethod === 'custom' ? 'flex' : 'none'}; flex-direction: column; gap: 0.5rem; margin-top: -0.5rem;">
+                        <label>Đánh số tùy chỉnh từng câu</label>
+                        <div id="custom-numbering-list-${tab.id}" class="custom-numbering-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.5rem; background: rgba(15, 23, 42, 0.4); display: flex; flex-direction: column; gap: 0.5rem;">
+                            <!-- Will be rendered dynamically -->
+                        </div>
+                    </div>
+
+                    <button id="btn-generate-${tab.id}" class="btn btn-generate" onclick="startGeneration('${tab.id}')">
+                        <span>🚀 Bắt đầu tạo hàng loạt</span>
+                    </button>
+
+                    <!-- Control buttons during generation -->
+                    <div id="control-group-${tab.id}" class="control-group" style="display: none;">
+                        <button id="btn-pause-${tab.id}" class="btn btn-pause" onclick="togglePause('${tab.id}')" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+                            ⏸️ Tạm dừng
+                        </button>
+                        <button id="btn-stop-${tab.id}" class="btn btn-stop" onclick="confirmStop('${tab.id}')" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">
+                            ⏹️ Dừng hẳn
+                        </button>
+                    </div>
+
+                    <!-- Progress Visualizer -->
+                    <div id="progress-container-${tab.id}" class="progress-container" style="display: none;">
+                        <div class="progress-header">
+                            <span id="progress-label-${tab.id}" class="progress-label">Đang chuẩn bị...</span>
+                            <span id="progress-percentage-${tab.id}" class="progress-percentage">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="progress-bar-fill-${tab.id}" class="progress-bar-fill"></div>
+                        </div>
+                        <div id="status-text-${tab.id}" class="status-text">Đang khởi tạo mô hình...</div>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Audio Management -->
+                <div class="panel">
+                    <div class="form-group">
+                        <div class="manager-header">
+                            <label>Các file đã tạo trong thư mục</label>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="loadFilesForTab('${tab.id}')">Reset</button>
+                                <button id="btn-clear-all-${tab.id}" class="btn-sm-danger btn-clear-all" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; border-color: rgba(239, 68, 68, 0.4);" onclick="clearAllFiles('${tab.id}')">Delete</button>
+                            </div>
+                        </div>
+                        <input type="text" id="search-files-${tab.id}" class="search-files" placeholder="🔍 Tìm kiếm file nhanh..." style="margin-top: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.85rem;" oninput="filterFilesList('${tab.id}')">
+                        <div id="file-list-container-${tab.id}" class="file-list">
+                            <div class="empty-state">Nhập thư mục để tải danh sách file âm thanh.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+            
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = panelHtml.trim();
+            wrapper.appendChild(tempDiv.firstChild);
+            
+            setupTabEventListeners(tab.id);
+        }
+
+        function populateTabDropdowns(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const folderSelect = document.getElementById(`folder-select-${tabId}`);
+            const sampleSelect = document.getElementById(`sample-select-${tabId}`);
+            
+            folderSelect.innerHTML = '';
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = "ROOT";
+            defaultOpt.textContent = "Chọn thư mục có sẵn...";
+            folderSelect.appendChild(defaultOpt);
+            
+            globalPresetFolders.forEach(folder => {
+                const opt = document.createElement('option');
+                opt.value = folder.path;
+                opt.textContent = folder.name;
+                folderSelect.appendChild(opt);
+            });
+            
+            sampleSelect.innerHTML = '';
+            globalSamples.forEach(sample => {
+                const opt = document.createElement('option');
+                opt.value = sample.path;
+                opt.textContent = sample.name;
+                sampleSelect.appendChild(opt);
+            });
+            
+            const folderPathInput = document.getElementById(`folder-path-${tabId}`);
+            if (tab.folderPath) {
+                folderPathInput.value = tab.folderPath;
+            } else {
+                const ketQuaFolder = globalPresetFolders.find(f => f.name === "Kết quả");
+                if (ketQuaFolder) {
+                    folderPathInput.value = ketQuaFolder.path;
+                } else if (globalPresetFolders.length > 0) {
+                    folderPathInput.value = globalPresetFolders[0].path;
+                } else {
+                    folderPathInput.value = globalBaseDir;
+                }
+                tab.folderPath = folderPathInput.value;
+            }
+            
+            syncTabFolderSelect(tabId);
+            
+            if (tab.selectedSample) {
+                let sampleExists = globalSamples.some(s => s.path === tab.selectedSample);
+                if (sampleExists) {
+                    sampleSelect.value = tab.selectedSample;
+                } else if (globalSamples.length > 0) {
+                    sampleSelect.value = globalSamples[0].path;
+                    tab.selectedSample = sampleSelect.value;
+                }
+            } else if (globalSamples.length > 0) {
+                const sampleMp3 = globalSamples.find(s => s.name === 'sample.mp3');
+                if (sampleMp3) {
+                    sampleSelect.value = sampleMp3.path;
+                } else {
+                    sampleSelect.value = globalSamples[0].path;
+                }
+                tab.selectedSample = sampleSelect.value;
+            }
+            
+            updateTabSampleAudio(tabId, !!tab.refText);
+        }
+
+        function syncTabFolderSelect(tabId) {
+            const folderPathInput = document.getElementById(`folder-path-${tabId}`);
+            const folderSelect = document.getElementById(`folder-select-${tabId}`);
+            const currentPath = folderPathInput.value.trim();
+            let matched = false;
+            for (let i = 0; i < folderSelect.options.length; i++) {
+                if (folderSelect.options[i].value === currentPath) {
+                    folderSelect.value = currentPath;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                folderSelect.value = "ROOT";
+            }
+        }
+
+        async function updateTabSampleAudio(tabId, restoreText = false) {
+            const sampleSelect = document.getElementById(`sample-select-${tabId}`);
+            const sampleAudioPlayer = document.getElementById(`sample-audio-player-${tabId}`);
+            const refTextInput = document.getElementById(`ref-text-${tabId}`);
+            
+            const selectedPath = sampleSelect.value;
+            if (selectedPath) {
+                sampleAudioPlayer.src = `/api/audio?path=${encodeURIComponent(selectedPath)}&t=${new Date().getTime()}`;
+                sampleAudioPlayer.style.display = 'block';
+                sampleAudioPlayer.load();
+                if (restoreText) {
+                    const tab = tabs.find(t => t.id === tabId);
+                    if (tab && tab.refText) {
+                        refTextInput.value = tab.refText;
+                        return;
+                    }
+                }
+                await transcribeTabSample(tabId, selectedPath);
+            } else {
+                sampleAudioPlayer.style.display = 'none';
+            }
+        }
+
+        async function transcribeTabSample(tabId, path) {
+            const refTextInput = document.getElementById(`ref-text-${tabId}`);
             refTextInput.value = "";
             refTextInput.placeholder = "⌛ Đang tự động nhận diện nội dung giọng nói mẫu...";
             refTextInput.disabled = true;
@@ -718,6 +1289,11 @@ HTML_CONTENT = """
                 const data = await res.json();
                 if (data.success && data.text) {
                     refTextInput.value = data.text;
+                    const tab = tabs.find(t => t.id === tabId);
+                    if (tab) {
+                        tab.refText = data.text;
+                        saveAllTabs();
+                    }
                 } else {
                     refTextInput.placeholder = "Nhập nội dung tương ứng của file mẫu...";
                 }
@@ -729,50 +1305,169 @@ HTML_CONTENT = """
             }
         }
 
-        function updateSampleAudio() {
-            const selectedPath = sampleSelect.value;
-            if (selectedPath) {
-                sampleAudioPlayer.src = `/api/audio?path=${encodeURIComponent(selectedPath)}`;
-                sampleAudioPlayer.style.display = 'block';
-                transcribeSample(selectedPath);
-            } else {
-                sampleAudioPlayer.style.display = 'none';
-            }
+        function setupTabEventListeners(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const sentencesEl = document.getElementById(`sentences-${tabId}`);
+            const folderPathEl = document.getElementById(`folder-path-${tabId}`);
+            const folderSelectEl = document.getElementById(`folder-select-${tabId}`);
+            const sampleSelectEl = document.getElementById(`sample-select-${tabId}`);
+            const refTextEl = document.getElementById(`ref-text-${tabId}`);
+            const speedSliderEl = document.getElementById(`speed-slider-${tabId}`);
+            const speedValEl = document.getElementById(`speed-val-${tabId}`);
+            const speedMethodEl = document.getElementById(`speed-method-${tabId}`);
+            const numberingMethodEl = document.getElementById(`numbering-method-${tabId}`);
+            const startNumberEl = document.getElementById(`start-number-${tabId}`);
+            const startNumberGroupEl = document.getElementById(`start-number-group-${tabId}`);
+            const customNumberingContainerEl = document.getElementById(`custom-numbering-container-${tabId}`);
+            const btnBrowseFolderEl = document.getElementById(`btn-browse-folder-${tabId}`);
+            const fileUploaderEl = document.getElementById(`file-uploader-${tabId}`);
+            
+            sentencesEl.addEventListener('input', () => {
+                tab.sentences = sentencesEl.value;
+                saveAllTabs();
+                syncTabCustomNumbers(tabId);
+            });
+            
+            folderPathEl.addEventListener('change', () => {
+                tab.folderPath = folderPathEl.value.trim();
+                saveAllTabs();
+                syncTabFolderSelect(tabId);
+                loadFilesForTab(tabId);
+            });
+            
+            folderSelectEl.addEventListener('change', () => {
+                if (folderSelectEl.value !== "ROOT") {
+                    folderPathEl.value = folderSelectEl.value;
+                    tab.folderPath = folderSelectEl.value;
+                    saveAllTabs();
+                    loadFilesForTab(tabId);
+                }
+            });
+            
+            sampleSelectEl.addEventListener('change', () => {
+                tab.selectedSample = sampleSelectEl.value;
+                saveAllTabs();
+                updateTabSampleAudio(tabId);
+            });
+            
+            refTextEl.addEventListener('input', () => {
+                tab.refText = refTextEl.value;
+                saveAllTabs();
+            });
+            
+            speedSliderEl.addEventListener('input', () => {
+                const val = parseFloat(speedSliderEl.value);
+                speedValEl.textContent = val.toFixed(2);
+                tab.speed = val;
+                saveAllTabs();
+            });
+            
+            speedMethodEl.addEventListener('change', () => {
+                tab.speedMethod = speedMethodEl.value;
+                saveAllTabs();
+            });
+            
+            numberingMethodEl.addEventListener('change', () => {
+                tab.numberingMethod = numberingMethodEl.value;
+                startNumberGroupEl.style.display = tab.numberingMethod === 'auto' ? 'flex' : 'none';
+                customNumberingContainerEl.style.display = tab.numberingMethod === 'custom' ? 'flex' : 'none';
+                saveAllTabs();
+                if (tab.numberingMethod === 'custom') {
+                    syncTabCustomNumbers(tabId);
+                }
+            });
+            
+            startNumberEl.addEventListener('input', () => {
+                tab.startNumber = startNumberEl.value.trim();
+                saveAllTabs();
+            });
+            
+            btnBrowseFolderEl.addEventListener('click', async () => {
+                btnBrowseFolderEl.disabled = true;
+                btnBrowseFolderEl.textContent = "⌛ Đang chọn...";
+                try {
+                    const res = await fetch('/api/browse-folder', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.path) {
+                        folderPathEl.value = data.path;
+                        tab.folderPath = data.path;
+                        saveAllTabs();
+                        syncTabFolderSelect(tabId);
+                        loadFilesForTab(tabId);
+                    } else if (data.error) {
+                        alert("Lỗi khi chọn thư mục: " + data.error);
+                    }
+                } catch (err) {
+                    console.error("Lỗi kết nối:", err);
+                } finally {
+                    btnBrowseFolderEl.disabled = false;
+                    btnBrowseFolderEl.textContent = "🔍 Finder...";
+                }
+            });
+            
+            fileUploaderEl.addEventListener('change', async () => {
+                if (!fileUploaderEl.files || fileUploaderEl.files.length === 0) return;
+                const file = fileUploaderEl.files[0];
+                const formData = new FormData();
+                formData.append("file", file);
+                
+                const uploadStatusEl = document.getElementById(`upload-status-${tabId}`);
+                uploadStatusEl.style.color = "var(--text-secondary)";
+                uploadStatusEl.textContent = "Đang tải lên...";
+                
+                try {
+                    const res = await fetch("/api/upload-sample", {
+                        method: "POST",
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        uploadStatusEl.style.color = "var(--success)";
+                        uploadStatusEl.textContent = `Đã tải lên: ${data.name}`;
+                        
+                        await loadMetadataGlobal();
+                        
+                        tabs.forEach(t => {
+                            const sampleSelectOther = document.getElementById(`sample-select-${t.id}`);
+                            if (sampleSelectOther) {
+                                const valBefore = sampleSelectOther.value;
+                                sampleSelectOther.innerHTML = '';
+                                globalSamples.forEach(sample => {
+                                    const opt = document.createElement('option');
+                                    opt.value = sample.path;
+                                    opt.textContent = sample.name;
+                                    sampleSelectOther.appendChild(opt);
+                                });
+                                if (t.id === tabId) {
+                                    sampleSelectOther.value = data.path;
+                                    tab.selectedSample = data.path;
+                                } else {
+                                    sampleSelectOther.value = valBefore;
+                                }
+                            }
+                        });
+                        
+                        saveAllTabs();
+                        updateTabSampleAudio(tabId);
+                    } else {
+                        uploadStatusEl.style.color = "var(--danger)";
+                        uploadStatusEl.textContent = "Lỗi: " + data.error;
+                    }
+                } catch (err) {
+                    uploadStatusEl.style.color = "var(--danger)";
+                    uploadStatusEl.textContent = "Lỗi kết nối";
+                }
+            });
         }
 
-        // Dropdown selection updates text input
-        folderSelect.onchange = () => {
-            folderPathInput.value = folderSelect.value;
-            loadFiles();
-        };
-
-        // Custom path input change reloads files
-        folderPathInput.onchange = loadFiles;
-        
-        // Cập nhật audio player khi thay đổi tệp mẫu
-        sampleSelect.onchange = updateSampleAudio;
-
-        btnBrowseFolder.onclick = async () => {
-            btnBrowseFolder.disabled = true;
-            btnBrowseFolder.textContent = "⌛ Đang chọn...";
-            try {
-                const res = await fetch('/api/browse-folder', { method: 'POST' });
-                const data = await res.json();
-                if (data.path) {
-                    folderPathInput.value = data.path;
-                    loadFiles();
-                } else if (data.error) {
-                    alert("Lỗi khi chọn thư mục: " + data.error);
-                }
-            } catch (err) {
-                console.error("Lỗi kết nối:", err);
-            } finally {
-                btnBrowseFolder.disabled = false;
-                btnBrowseFolder.textContent = "🔍 Finder...";
-            }
-        };
-
-        async function loadFiles() {
+        async function loadFilesForTab(tabId) {
+            const folderPathInput = document.getElementById(`folder-path-${tabId}`);
+            const fileListContainer = document.getElementById(`file-list-container-${tabId}`);
+            const searchFilesInput = document.getElementById(`search-files-${tabId}`);
+            if (!folderPathInput || !fileListContainer || !searchFilesInput) return;
+            
             const folder = folderPathInput.value.trim();
             if (!folder) return;
             try {
@@ -784,19 +1479,22 @@ HTML_CONTENT = """
                     return;
                 }
 
-                loadedFiles = data.files || [];
-                renderFilesList(searchFiles.value.trim());
+                tabLoadedFiles[tabId] = data.files || [];
+                renderFilesListForTab(tabId, searchFilesInput.value.trim());
             } catch (err) {
                 console.error("Lỗi khi tải file:", err);
             }
         }
 
-        function renderFilesList(filterText = "") {
+        function renderFilesListForTab(tabId, filterText = "") {
+            const fileListContainer = document.getElementById(`file-list-container-${tabId}`);
+            if (!fileListContainer) return;
+            const files = tabLoadedFiles[tabId] || [];
             const query = filterText.toLowerCase();
-            const filtered = loadedFiles.filter(file => file.name.toLowerCase().includes(query));
+            const filtered = files.filter(file => file.name.toLowerCase().includes(query));
 
             if (filtered.length === 0) {
-                fileListContainer.innerHTML = loadedFiles.length === 0 
+                fileListContainer.innerHTML = files.length === 0 
                     ? '<div class="empty-state">Thư mục này chưa có file âm thanh .wav nào.</div>'
                     : '<div class="empty-state">Không tìm thấy file nào khớp với tìm kiếm.</div>';
                 return;
@@ -820,7 +1518,7 @@ HTML_CONTENT = """
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'btn-sm-danger';
                 deleteBtn.textContent = 'Xóa';
-                deleteBtn.onclick = () => deleteFile(file.path);
+                deleteBtn.onclick = () => deleteFileForTab(tabId, file.path);
                 
                 actions.appendChild(deleteBtn);
                 info.appendChild(name);
@@ -829,7 +1527,7 @@ HTML_CONTENT = """
                 const audio = document.createElement('audio');
                 audio.controls = true;
                 audio.preload = 'metadata';
-                audio.src = `/api/audio?path=${encodeURIComponent(file.path)}`;
+                audio.src = `/api/audio?path=${encodeURIComponent(file.path)}&t=${new Date().getTime()}`;
                 
                 item.appendChild(info);
                 item.appendChild(audio);
@@ -837,17 +1535,20 @@ HTML_CONTENT = """
             });
         }
 
-        searchFiles.oninput = (e) => {
-            renderFilesList(e.target.value.trim());
-        };
+        function filterFilesList(tabId) {
+            const searchInput = document.getElementById(`search-files-${tabId}`);
+            if (searchInput) {
+                renderFilesListForTab(tabId, searchInput.value.trim());
+            }
+        }
 
-        async function deleteFile(path) {
+        async function deleteFileForTab(tabId, path) {
             if (!confirm(`Bạn có chắc muốn xóa file này?`)) return;
             try {
                 const res = await fetch(`/api/delete-audio?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
                 const result = await res.json();
                 if (result.success) {
-                    loadFiles();
+                    loadFilesForTab(tabId);
                 } else {
                     alert("Không thể xóa file: " + result.error);
                 }
@@ -856,88 +1557,127 @@ HTML_CONTENT = """
             }
         }
 
-        async function uploadSampleFile(input) {
-            if (!input.files || input.files.length === 0) return;
-            const file = input.files[0];
-            const formData = new FormData();
-            formData.append("file", file);
-
-            uploadStatus.style.color = "var(--text-secondary)";
-            uploadStatus.textContent = "Đang tải lên...";
-
-            try {
-                const res = await fetch("/api/upload-sample", {
-                    method: "POST",
-                    body: formData
-                });
-                const data = await res.json();
-                if (data.success) {
-                    uploadStatus.style.color = "var(--success)";
-                    uploadStatus.textContent = `Đã tải lên: ${data.name}`;
-                    
-                    await loadMetadata();
-                    sampleSelect.value = data.path;
-                    updateSampleAudio();
-                } else {
-                    uploadStatus.style.color = "var(--danger)";
-                    uploadStatus.textContent = "Lỗi: " + data.error;
+        async function clearAllFiles(tabId) {
+            const folderPathEl = document.getElementById(`folder-path-${tabId}`);
+            const folder = folderPathEl.value.trim();
+            if (!folder) return;
+            if (confirm("⚠️ Bạn có chắc chắn muốn XÓA TẤT CẢ các file âm thanh .wav trong thư mục này không? Thao tác này không thể hoàn tác.")) {
+                try {
+                    const res = await fetch(`/api/clear-all?folder=${encodeURIComponent(folder)}`, { method: 'DELETE' });
+                    const result = await res.json();
+                    if (result.success) {
+                        loadFilesForTab(tabId);
+                    } else {
+                        alert("Lỗi khi xóa tất cả: " + result.error);
+                    }
+                } catch (err) {
+                    alert("Lỗi kết nối: " + err);
                 }
-            } catch (err) {
-                uploadStatus.style.color = "var(--danger)";
-                uploadStatus.textContent = "Lỗi kết nối";
             }
         }
 
-        function resetUI() {
-            btnGenerate.style.display = 'flex';
-            controlGroup.style.display = 'none';
-            btnPause.disabled = false;
-            btnStop.disabled = false;
-            btnPause.innerHTML = '⏸️ Tạm dừng';
-            btnStop.innerHTML = '⏹️ Dừng hẳn';
-        }
-
-        async function processNextSentence() {
-            if (isStopped) {
-                statusText.textContent = '⛔ Quá trình đã bị dừng bởi người dùng.';
-                resetUI();
-                loadFiles();
-                return;
-            }
-
-            if (isPaused) {
-                statusText.textContent = '⏸️ Đang tạm dừng. Nhấp "Tiếp tục" để chạy tiếp.';
-                btnPause.innerHTML = '▶️ Tiếp tục';
-                btnPause.disabled = false;
-                return;
-            }
-
-            if (currentIndex >= totalSentences) {
-                progressBarFill.style.width = '100%';
-                progressPercentage.textContent = '100%';
-                progressLabel.textContent = 'Hoàn thành!';
-                statusText.textContent = `Tạo thành công toàn bộ ${totalSentences} câu nói.`;
-                resetUI();
-                loadFiles();
-                return;
-            }
-
-            const currentText = sentenceList[currentIndex];
-            const percent = Math.round((currentIndex) / totalSentences * 100);
+        function resetTabUI(tabId) {
+            const btnGenerate = document.getElementById(`btn-generate-${tabId}`);
+            const controlGroup = document.getElementById(`control-group-${tabId}`);
+            const btnPause = document.getElementById(`btn-pause-${tabId}`);
+            const btnStop = document.getElementById(`btn-stop-${tabId}`);
             
-            progressBarFill.style.width = `${percent}%`;
-            progressPercentage.textContent = `${percent}%`;
-            progressLabel.textContent = `Đang xử lý câu ${currentIndex + 1}/${totalSentences}`;
-            statusText.textContent = `Chuẩn bị sinh giọng cho: "${currentText}"`;
+            if (btnGenerate) btnGenerate.style.display = 'flex';
+            if (controlGroup) controlGroup.style.display = 'none';
+            if (btnPause) {
+                btnPause.disabled = false;
+                btnPause.innerHTML = '⏸️ Tạm dừng';
+            }
+            if (btnStop) {
+                btnStop.disabled = false;
+                btnStop.innerHTML = '⏹️ Dừng hẳn';
+            }
+        }
+
+        async function processNextSentenceForTab(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const { state } = tab;
+            
+            const progressContainer = document.getElementById(`progress-container-${tabId}`);
+            const progressLabel = document.getElementById(`progress-label-${tabId}`);
+            const progressPercentage = document.getElementById(`progress-percentage-${tabId}`);
+            const progressBarFill = document.getElementById(`progress-bar-fill-${tabId}`);
+            const statusText = document.getElementById(`status-text-${tabId}`);
+            const btnPause = document.getElementById(`btn-pause-${tabId}`);
+            
+            if (state.isStopped) {
+                if (statusText) statusText.textContent = '⛔ Quá trình đã bị dừng bởi người dùng.';
+                state.isGenerating = false;
+                resetTabUI(tabId);
+                loadFilesForTab(tabId);
+                
+                if (isRunningAll) {
+                    stopRunAllQueue();
+                }
+                return;
+            }
+
+            if (state.isPaused) {
+                if (statusText) statusText.textContent = '⏸️ Đang tạm dừng. Nhấp "Tiếp tục" để chạy tiếp.';
+                if (btnPause) {
+                    btnPause.innerHTML = '▶️ Tiếp tục';
+                    btnPause.disabled = false;
+                }
+                return;
+            }
+
+            if (state.currentIndex >= state.totalSentences) {
+                if (progressBarFill) progressBarFill.style.width = '100%';
+                if (progressPercentage) progressPercentage.textContent = '100%';
+                if (progressLabel) progressLabel.textContent = 'Hoàn thành!';
+                if (statusText) statusText.textContent = `Tạo thành công toàn bộ ${state.totalSentences} câu nói.`;
+                state.isGenerating = false;
+                resetTabUI(tabId);
+                loadFilesForTab(tabId);
+                
+                if (isRunningAll) {
+                    processNextTabInQueue();
+                } else {
+                    sendDesktopNotification("🎉 KhanhTTS OmniVoice Studio", `Đã hoàn thành sinh giọng cho ${state.totalSentences} câu nói ở "${tab.name}"!`);
+                }
+                return;
+            }
+
+            const currentText = state.sentenceList[state.currentIndex];
+            const percent = Math.round((state.currentIndex) / state.totalSentences * 100);
+            
+            if (progressBarFill) progressBarFill.style.width = `${percent}%`;
+            if (progressPercentage) progressPercentage.textContent = `${percent}%`;
+            if (progressLabel) progressLabel.textContent = `Đang xử lý câu ${state.currentIndex + 1}/${state.totalSentences}`;
+            if (statusText) statusText.textContent = `Chuẩn bị sinh giọng cho: "${currentText}"`;
+
+            const folderPath = document.getElementById(`folder-path-${tabId}`).value.trim();
+            const sampleSelect = document.getElementById(`sample-select-${tabId}`);
+            const refTextInput = document.getElementById(`ref-text-${tabId}`);
+            const speedSlider = document.getElementById(`speed-slider-${tabId}`);
+            const speedMethodSelect = document.getElementById(`speed-method-${tabId}`);
+            const numberingMethodEl = document.getElementById(`numbering-method-${tabId}`);
+            const startNumberInput = document.getElementById(`start-number-${tabId}`);
+
+            const isNumberingEnabled = numberingMethodEl.value !== 'none';
+            let startNumberStr = "1";
+            if (numberingMethodEl.value === 'auto') {
+                startNumberStr = getPrefixForIndex(startNumberInput.value.trim(), state.currentIndex);
+            } else if (numberingMethodEl.value === 'custom') {
+                startNumberStr = (tab.customNumbers && tab.customNumbers[state.currentIndex]) || String(state.currentIndex + 1);
+            }
 
             const payload = {
                 sentences: currentText,
-                folder: folderPathInput.value.trim(),
+                folder: folderPath,
                 ref_audio: sampleSelect.value,
                 ref_text: refTextInput.value,
                 speed: parseFloat(speedSlider.value),
-                enable_numbering: enableNumberingCheckbox.checked,
-                start_number: enableNumberingCheckbox.checked ? parseInt(startNumberInput.value) + currentIndex : 1
+                speed_method: speedMethodSelect.value,
+                enable_numbering: isNumberingEnabled,
+                start_number: startNumberStr
             };
 
             try {
@@ -965,13 +1705,13 @@ HTML_CONTENT = """
                         try {
                             const data = JSON.parse(line);
                             if (data.status === 'model_loading') {
-                                statusText.textContent = "🤖 Đang khởi tạo mô hình KhanhTTS-OmniVoice...";
+                                if (statusText) statusText.textContent = "🤖 Đang khởi tạo mô hình KhanhTTS-OmniVoice...";
                             } else if (data.status === 'processing') {
-                                statusText.textContent = `Đang sinh giọng cho: "${currentText}"`;
+                                if (statusText) statusText.textContent = `Đang sinh giọng cho: "${currentText}"`;
                             } else if (data.status === 'completed') {
-                                // Câu này hoàn thành
+                                // Completed sentence
                             } else if (data.status === 'error') {
-                                statusText.textContent = `❌ Lỗi ở câu: "${currentText}": ${data.message}`;
+                                if (statusText) statusText.textContent = `❌ Lỗi ở câu: "${currentText}": ${data.message}`;
                                 hasError = true;
                             }
                         } catch (e) {
@@ -981,91 +1721,203 @@ HTML_CONTENT = """
                 }
 
                 if (hasError) {
-                    resetUI();
+                    state.isGenerating = false;
+                    resetTabUI(tabId);
+                    if (isRunningAll) {
+                        stopRunAllQueue();
+                        sendDesktopNotification("❌ KhanhTTS OmniVoice Studio - Lỗi", `Quá trình sinh giọng bị dừng do gặp lỗi ở một câu.`);
+                    } else {
+                        sendDesktopNotification("❌ KhanhTTS OmniVoice Studio - Lỗi", `Gặp lỗi khi sinh giọng ở "${tab.name}".`);
+                    }
                     return;
                 }
 
-                currentIndex++;
-                const nextPercent = Math.round((currentIndex) / totalSentences * 100);
-                progressBarFill.style.width = `${nextPercent}%`;
-                progressPercentage.textContent = `${nextPercent}%`;
+                state.currentIndex++;
+                const nextPercent = Math.round((state.currentIndex) / state.totalSentences * 100);
+                if (progressBarFill) progressBarFill.style.width = `${nextPercent}%`;
+                if (progressPercentage) progressPercentage.textContent = `${nextPercent}%`;
 
-                processNextSentence();
+                processNextSentenceForTab(tabId);
             } catch (err) {
-                statusText.textContent = `❌ Lỗi kết nối: ${err}`;
-                resetUI();
+                if (statusText) statusText.textContent = `❌ Lỗi kết nối: ${err}`;
+                state.isGenerating = false;
+                resetTabUI(tabId);
+                if (isRunningAll) {
+                    stopRunAllQueue();
+                    sendDesktopNotification("❌ KhanhTTS OmniVoice Studio - Lỗi", `Quá trình sinh giọng bị dừng do gặp lỗi kết nối.`);
+                } else {
+                    sendDesktopNotification("❌ KhanhTTS OmniVoice Studio - Lỗi", `Lỗi sinh giọng ở "${tab.name}": ${err}`);
+                }
             }
         }
 
-        btnGenerate.onclick = async () => {
+        async function startGeneration(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const sentencesInput = document.getElementById(`sentences-${tabId}`);
+            const folderPathInput = document.getElementById(`folder-path-${tabId}`);
+            
             const rawSentences = sentencesInput.value.trim();
             if (!rawSentences) {
                 alert("Vui lòng nhập ít nhất một câu để tạo giọng nói.");
+                if (isRunningAll) stopRunAllQueue();
                 return;
             }
 
             const folderPath = folderPathInput.value.trim();
             if (!folderPath) {
                 alert("Vui lòng nhập đường dẫn thư mục lưu kết quả.");
+                if (isRunningAll) stopRunAllQueue();
                 return;
             }
 
-            sentenceList = rawSentences.split("\\n").map(s => s.trim()).filter(s => s);
-            totalSentences = sentenceList.length;
-            currentIndex = 0;
-            isPaused = false;
-            isStopped = false;
+            tab.state.sentenceList = rawSentences.split("\\n").map(s => s.trim()).filter(s => s);
+            tab.state.totalSentences = tab.state.sentenceList.length;
+            tab.state.currentIndex = 0;
+            tab.state.isPaused = false;
+            tab.state.isStopped = false;
+            tab.state.isGenerating = true;
 
-            btnGenerate.style.display = 'none';
-            controlGroup.style.display = 'grid';
-            btnPause.innerHTML = '⏸️ Tạm dừng';
+            const btnGenerate = document.getElementById(`btn-generate-${tabId}`);
+            const controlGroup = document.getElementById(`control-group-${tabId}`);
+            const btnPause = document.getElementById(`btn-pause-${tabId}`);
+            const progressContainer = document.getElementById(`progress-container-${tabId}`);
+            const progressBarFill = document.getElementById(`progress-bar-fill-${tabId}`);
+            const progressPercentage = document.getElementById(`progress-percentage-${tabId}`);
+            const progressLabel = document.getElementById(`progress-label-${tabId}`);
+            const statusText = document.getElementById(`status-text-${tabId}`);
 
-            progressContainer.style.display = 'block';
-            progressBarFill.style.width = '0%';
-            progressPercentage.textContent = '0%';
-            progressLabel.textContent = 'Đang chuẩn bị...';
-            statusText.textContent = 'Bắt đầu quá trình tạo hàng loạt...';
+            if (btnGenerate) btnGenerate.style.display = 'none';
+            if (controlGroup) controlGroup.style.display = 'grid';
+            if (btnPause) btnPause.innerHTML = '⏸️ Tạm dừng';
 
-            processNextSentence();
-        };
+            if (progressContainer) progressContainer.style.display = 'block';
+            if (progressBarFill) progressBarFill.style.width = '0%';
+            if (progressPercentage) progressPercentage.textContent = '0%';
+            if (progressLabel) progressLabel.textContent = 'Đang chuẩn bị...';
+            if (statusText) statusText.textContent = 'Bắt đầu quá trình tạo hàng loạt...';
 
-        btnPause.onclick = () => {
-            if (isPaused) {
-                isPaused = false;
-                btnPause.innerHTML = '⏸️ Tạm dừng';
-                statusText.textContent = 'Đang tiếp tục quá trình tạo...';
-                processNextSentence();
+            processNextSentenceForTab(tabId);
+        }
+
+        function togglePause(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const btnPause = document.getElementById(`btn-pause-${tabId}`);
+            const statusText = document.getElementById(`status-text-${tabId}`);
+            
+            if (tab.state.isPaused) {
+                tab.state.isPaused = false;
+                if (btnPause) btnPause.innerHTML = '⏸️ Tạm dừng';
+                if (statusText) statusText.textContent = 'Đang tiếp tục quá trình tạo...';
+                processNextSentenceForTab(tabId);
             } else {
-                isPaused = true;
-                btnPause.disabled = true;
-                btnPause.innerHTML = '⌛ Đang dừng...';
-                statusText.textContent = 'Đang đợi hoàn thành câu hiện tại để tạm dừng...';
+                tab.state.isPaused = true;
+                if (btnPause) {
+                    btnPause.disabled = true;
+                    btnPause.innerHTML = '⌛ Đang dừng...';
+                }
+                if (statusText) statusText.textContent = 'Đang đợi hoàn thành câu hiện tại để tạm dừng...';
             }
-        };
+        }
 
-        btnStop.onclick = () => {
-            confirmDialog.showModal();
-        };
-
-        btnConfirmNo.onclick = () => {
-            confirmDialog.close();
-        };
-
-        btnConfirmYes.onclick = () => {
-            confirmDialog.close();
-            isStopped = true;
-            if (isPaused) {
-                resetUI();
-                statusText.textContent = '⛔ Đang dừng hẳn...';
-                loadFiles();
+        function stopGeneration(tabId) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const btnStop = document.getElementById(`btn-stop-${tabId}`);
+            const statusText = document.getElementById(`status-text-${tabId}`);
+            
+            tab.state.isStopped = true;
+            if (tab.state.isPaused) {
+                tab.state.isGenerating = false;
+                resetTabUI(tabId);
+                if (statusText) statusText.textContent = '⛔ Đang dừng hẳn...';
+                loadFilesForTab(tabId);
             } else {
-                btnStop.disabled = true;
-                btnStop.innerHTML = '⌛ Đang dừng...';
-                statusText.textContent = 'Đang đợi hoàn thành câu hiện tại để dừng hẳn...';
+                if (btnStop) {
+                    btnStop.disabled = true;
+                    btnStop.innerHTML = '⌛ Đang dừng...';
+                }
+                if (statusText) statusText.textContent = 'Đang đợi hoàn thành câu hiện tại để dừng hẳn...';
             }
-        };
+        }
 
-        loadMetadata().then(loadFiles);
+        function runAllTabs() {
+            const btnRunAll = document.getElementById('btn-run-all');
+            
+            if (isRunningAll) {
+                if (confirm("⚠️ Bạn có chắc chắn muốn dừng quá trình sinh giọng nói trên TẤT CẢ các Tab không?")) {
+                    stopRunAllQueue();
+                }
+                return;
+            }
+            
+            const tabsToRun = tabs.filter(t => {
+                const textEl = document.getElementById(`sentences-${t.id}`);
+                const sentences = textEl ? textEl.value.trim() : '';
+                return sentences.length > 0;
+            });
+            
+            if (tabsToRun.length === 0) {
+                alert("Không có tab nào chứa danh sách câu nói để chạy.");
+                return;
+            }
+            
+            isRunningAll = true;
+            runAllQueue = tabsToRun.map(t => t.id);
+            
+            if (btnRunAll) {
+                btnRunAll.textContent = "⏹️ Dừng tất cả các Tab";
+                btnRunAll.classList.add('running');
+            }
+            
+            processNextTabInQueue();
+        }
+
+        function processNextTabInQueue() {
+            if (!isRunningAll) return;
+            
+            if (runAllQueue.length === 0) {
+                isRunningAll = false;
+                const btnRunAll = document.getElementById('btn-run-all');
+                if (btnRunAll) {
+                    btnRunAll.textContent = "🚀 Chạy tất cả các Tab";
+                    btnRunAll.classList.remove('running');
+                }
+                sendDesktopNotification("🎉 KhanhTTS OmniVoice Studio", "Đã hoàn thành sinh giọng nói cho TOÀN BỘ các Tab!");
+                alert("🎉 Đã hoàn thành sinh giọng nói cho toàn bộ các Tab!");
+                return;
+            }
+            
+            const nextTabId = runAllQueue.shift();
+            selectTab(nextTabId);
+            startGeneration(nextTabId);
+        }
+
+        function stopRunAllQueue() {
+            isRunningAll = false;
+            runAllQueue = [];
+            
+            const btnRunAll = document.getElementById('btn-run-all');
+            if (btnRunAll) {
+                btnRunAll.textContent = "🚀 Chạy tất cả các Tab";
+                btnRunAll.classList.remove('running');
+            }
+            
+            tabs.forEach(t => {
+                if (t.state && t.state.isGenerating) {
+                    stopGeneration(t.id);
+                }
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initTabs();
+            requestNotificationPermission();
+        });
     </script>
 </body>
 </html>
@@ -1226,8 +2078,9 @@ class GenerateRequest(BaseModel):
     ref_audio: str
     ref_text: str
     speed: float = 1.0
+    speed_method: str = "model"
     enable_numbering: bool = False
-    start_number: int = 1
+    start_number: str = "1"
 
 @app.post("/api/generate")
 async def generate_voice(req: GenerateRequest):
@@ -1241,7 +2094,8 @@ async def generate_voice(req: GenerateRequest):
                 yield json.dumps({"status": "error", "message": f"Không tìm thấy file mẫu: {req.ref_audio}"}) + "\n"
                 return
 
-            wav_sample = os.path.join(BASE_DIR, "temp_sample.wav")
+            import uuid
+            wav_sample = os.path.join(BASE_DIR, f"temp_sample_{uuid.uuid4().hex}.wav")
             sound = AudioSegment.from_file(ref_audio_path)
             sound = sound.set_frame_rate(24000).set_channels(1)
             sound.export(wav_sample, format="wav")
@@ -1257,8 +2111,23 @@ async def generate_voice(req: GenerateRequest):
                 
                 ten_file_sach = clean_filename(text)
                 if req.enable_numbering:
-                    current_num = req.start_number + (idx - 1)
-                    ten_file_sach = f"{current_num}_{ten_file_sach}"
+                    try:
+                        match = re.match(r"^(.*?)(\d+)$", req.start_number)
+                        if match:
+                            prefix_part = match.group(1)
+                            digits_part = match.group(2)
+                            start_val = int(digits_part)
+                            current_val = start_val + (idx - 1)
+                            padded_digits = str(current_val).zfill(len(digits_part))
+                            num_str = f"{prefix_part}{padded_digits}"
+                        else:
+                            if idx > 1:
+                                num_str = f"{req.start_number}_{idx}"
+                            else:
+                                num_str = req.start_number
+                    except Exception:
+                        num_str = req.start_number
+                    ten_file_sach = f"{num_str}_{ten_file_sach}"
                 file_output = os.path.join(target_dir, f"{ten_file_sach}.wav")
                 
                 if os.path.exists(file_output):
@@ -1271,24 +2140,38 @@ async def generate_voice(req: GenerateRequest):
                             break
                         counter += 1
                 
-                cau_co_moi = text
+                # Chuẩn hóa dấu ba chấm (...) và ellipsis (…) thành dấu phẩy (,) để tránh model bỏ chữ/hallucinate
+                cau_co_moi = text.replace("…", ", ").replace("...", ", ")
+                cau_co_moi = re.sub(r',\s*,', ',', cau_co_moi)
+                cau_co_moi = re.sub(r'\s+', ' ', cau_co_moi).strip()
                 
                 loop = asyncio.get_event_loop()
                 def run_gen():
-                    gen_kwargs = {}
-                    if req.speed and req.speed != 1.0:
-                        gen_kwargs["speed"] = req.speed
-                        
-                    return model_instance.generate(
-                        text=cau_co_moi,
-                        ref_audio=wav_sample,
-                        ref_text=req.ref_text,
-                        **gen_kwargs
-                    )
+                    if req.speed_method == "model":
+                        gen_kwargs = {}
+                        if req.speed and req.speed != 1.0:
+                            gen_kwargs["speed"] = req.speed
+                        audio = model_instance.generate(
+                            text=cau_co_moi,
+                            ref_audio=wav_sample,
+                            ref_text=req.ref_text,
+                            **gen_kwargs
+                        )
+                        audio_data = audio[0]
+                    else:
+                        audio = model_instance.generate(
+                            text=cau_co_moi,
+                            ref_audio=wav_sample,
+                            ref_text=req.ref_text
+                        )
+                        audio_data = audio[0]
+                        if req.speed and req.speed != 1.0:
+                            audio_data = librosa.effects.time_stretch(audio_data, rate=req.speed, n_fft=512)
+                    return audio_data
                 
                 try:
-                    audio = await loop.run_in_executor(None, run_gen)
-                    sf.write(file_output, audio[0], 24000)
+                    audio_data = await loop.run_in_executor(None, run_gen)
+                    sf.write(file_output, audio_data, 24000)
                     yield json.dumps({"status": "completed", "index": idx, "total": total, "filename": f"{ten_file_sach}.wav"}) + "\n"
                 except Exception as e:
                     yield json.dumps({"status": "error", "message": f"Lỗi ở câu '{text}': {str(e)}"}) + "\n"
