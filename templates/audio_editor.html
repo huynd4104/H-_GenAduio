@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Merge & Timeline Editor - Studio</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <!-- React & Babel CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.12.9/babel.min.js"></script>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- WaveSurfer.js -->
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        outfit: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        darkBg: '#0b0f19',
+                        panelBg: 'rgba(30, 41, 59, 0.4)',
+                        accentColor: '#6366f1',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .glass-panel {
+                @apply bg-slate-900/60 border border-white/10 shadow-2xl backdrop-blur-md;
+            }
+            .accent-glow {
+                box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+            }
+        }
+        
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.4);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(99, 102, 241, 0.6);
+        }
+    </style>
+</head>
+
+<body
+    class="bg-darkBg text-slate-100 font-sans min-height-screen flex flex-col selection:bg-indigo-500/30 selection:text-white select-none">
+    <div id="root" class="min-h-screen flex flex-col"></div>
+
+    <!-- Custom Drag Ghost Element -->
+    <div id="drag-ghost"
+        style="position: fixed; left: -9999px; top: -9999px; background: #6366f1; color: white; font-family: sans-serif; font-size: 11px; font-weight: 600; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); pointer-events: none; display: flex; align-items: center; gap: 6px; z-index: 9999;">
+        <span>🎵</span>
+        <span id="drag-ghost-text"></span>
+    </div>
+
+    <script type="text/babel" data-presets="react">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // Global cache for decoded AudioBuffers: audioId -> AudioBuffer
+        const audioBuffersCache = {};
+        let globalAudioCtx = null;
+
+        function getAudioContext() {
+            if (!globalAudioCtx) {
+                globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (globalAudioCtx.state === 'suspended') {
+                globalAudioCtx.resume();
+            }
+            return globalAudioCtx;
+        }
+
+        // --- LibraryItem Component ---
+        const LibraryItem = ({ file, onAddToTimeline, isScanned }) => {
+            const containerRef = useRef(null);
+            const wavesurferRef = useRef(null);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isDecoding, setIsDecoding] = useState(false);
+            const [isDecoded, setIsDecoded] = useState(false);
+
+            useEffect(() => {
+                wavesurferRef.current = WaveSurfer.create({
+                    container: containerRef.current,
+                    waveColor: '#475569',
+                    progressColor: '#6366f1',
+                    height: 35,
+                    cursorWidth: 1,
+                    barWidth: 2,
+                    barGap: 1,
+                    url: `/api/audio-editor/stream?id=${file.id}`
+                });
+
+                wavesurferRef.current.on('play', () => setIsPlaying(true));
+                wavesurferRef.current.on('pause', () => setIsPlaying(false));
+                wavesurferRef.current.on('finish', () => setIsPlaying(false));
+
+                // Check cache
+                if (audioBuffersCache[file.id]) {
+                    setIsDecoded(true);
+                }
+
+                return () => {
+                    if (wavesurferRef.current) {
+                        wavesurferRef.current.destroy();
+                    }
+                };
+            }, [file.id]);
+
+            const togglePlay = () => {
+                if (wavesurferRef.current) {
+                    wavesurferRef.current.playPause();
+                }
+            };
+
+            const decodeAudio = async () => {
+                if (audioBuffersCache[file.id]) {
+                    setIsDecoded(true);
+                    return audioBuffersCache[file.id];
+                }
+                setIsDecoding(true);
+                try {
+                    const ctx = getAudioContext();
+                    const res = await fetch(`/api/audio-editor/stream?id=${file.id}`);
+                    const arrayBuffer = await res.arrayBuffer();
+                    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+                    audioBuffersCache[file.id] = audioBuffer;
+                    setIsDecoded(true);
+                    return audioBuffer;
+                } catch (e) {
+                    console.error("Decoding error:", e);
+                } finally {
+                    setIsDecoding(false);
+                }
+            };
+
+            const handleAdd = async () => {
+                let buffer = audioBuffersCache[file.id];
+                if (!buffer) {
+                    buffer = await decodeAudio();
+                }
+                if (buffer) {
+                    onAddToTimeline(file.id, file.filename, file.duration);
+                }
+            };
+
+            const handleDragStart = (e) => {
+                // Xóa bôi đen văn bản còn sót lại để tránh ảnh hưởng đến ghost image
+                if (window.getSelection) {
+                    window.getSelection().removeAllRanges();
+                }
+
+                // Cập nhật và hiển thị drag ghost image tùy chỉnh để tránh bug cuộn của trình duyệt
+                const ghost = document.getElementById('drag-ghost');
+                if (ghost) {
+                    const textEl = document.getElementById('drag-ghost-text');
+                    if (textEl) textEl.textContent = file.filename;
+
+                    // Di chuyển tạm thời vào khung nhìn (nhưng ngoài tầm nhìn người dùng) để trình duyệt chụp ảnh
+                    ghost.style.left = '0px';
+                    ghost.style.top = '0px';
+
+                    if (e.dataTransfer.setDragImage) {
+                        e.dataTransfer.setDragImage(ghost, 20, 20);
+                    }
+
+                    // Trả về vị trí ẩn ngay lập tức ở frame tiếp theo
+                    setTimeout(() => {
+                        ghost.style.left = '-9999px';
+                        ghost.style.top = '-9999px';
+                    }, 0);
+                }
+
+                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("audioId", file.id);
+                e.dataTransfer.setData("filename", file.filename);
+                e.dataTransfer.setData("duration", file.duration);
+            };
+
+            return (
+                <div
+                    draggable={true}
+                    onDragStart={handleDragStart}
+                    className="flex flex-col gap-2 p-3 bg-slate-900/50 border border-slate-800 rounded-lg hover:border-indigo-500/50 transition cursor-grab active:cursor-grabbing select-none"
+                >
+                    <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold truncate text-slate-200" title={file.filename}>
+                            🎚️ {file.filename}
+                        </span>
+                        <span className="text-xs text-slate-400 shrink-0 font-mono">
+                            {file.duration.toFixed(1)}s
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={togglePlay}
+                            className="p-1.5 bg-indigo-600 rounded-full hover:bg-indigo-500 text-white shrink-0 transition"
+                        >
+                            {isPlaying ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" class="w-4 h-4">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" class="w-4 h-4">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                                </svg>
+                            )}
+                        </button>
+                        <div ref={containerRef} className="flex-1 min-w-0" />
+                        <button
+                            onClick={handleAdd}
+                            disabled={isDecoding}
+                            className="px-2.5 py-1 bg-slate-800 border border-slate-700 hover:border-indigo-500 text-xs font-semibold rounded transition flex items-center gap-1 text-slate-300 hover:text-white"
+                        >
+                            {isDecoding ? '⏳...' : isDecoded ? '✅' : '＋ Thêm'}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- AudioClip Component (Timeline Block) ---
+        const AudioClip = ({ clip, index, onUpdate, onDelete, onDragStart, onDragOver, onDrop, pixelsPerSecond, isLoaded }) => {
+            const canvasRef = useRef(null);
+            const [isDraggingLeft, setIsDraggingLeft] = useState(false);
+            const [isDraggingRight, setIsDraggingRight] = useState(false);
+            const dragStartX = useRef(0);
+            const dragStartVal = useRef(0);
+
+            // Draw waveform from cache
+            useEffect(() => {
+                const buffer = audioBuffersCache[clip.audioId];
+                const canvas = canvasRef.current;
+                if (!buffer || !canvas) return;
+
+                const ctx = canvas.getContext('2d');
+                const width = canvas.offsetWidth;
+                const height = canvas.offsetHeight;
+
+                // Set canvas coordinates resolution
+                canvas.width = width;
+                canvas.height = height;
+
+                ctx.clearRect(0, 0, width, height);
+
+                const sampleRate = buffer.sampleRate;
+                const rawData = buffer.getChannelData(0);
+
+                const startSample = Math.floor(clip.trimStart * sampleRate);
+                const endSample = Math.min(rawData.length, Math.floor(clip.trimEnd * sampleRate));
+                const dataSlice = rawData.subarray(startSample, endSample);
+
+                ctx.fillStyle = 'rgba(99, 102, 241, 0.4)';
+                const step = Math.ceil(dataSlice.length / width);
+                const amp = height / 2;
+
+                for (let i = 0; i < width; i++) {
+                    let min = 1.0;
+                    let max = -1.0;
+                    for (let j = 0; j < step; j++) {
+                        const datum = dataSlice[i * step + j];
+                        if (datum !== undefined) {
+                            if (datum < min) min = datum;
+                            if (datum > max) max = datum;
+                        }
+                    }
+                    if (min === 1.0) min = 0;
+                    if (max === -1.0) max = 0;
+
+                    const y1 = (1 + min) * amp;
+                    const y2 = (1 + max) * amp;
+                    ctx.fillRect(i, y1, 1, Math.max(1.5, y2 - y1));
+                }
+            }, [clip.audioId, clip.trimStart, clip.trimEnd, pixelsPerSecond, isLoaded]);
+
+            // Trimming Drag Left (start)
+            const handleLeftMouseDown = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setIsDraggingLeft(true);
+                dragStartX.current = e.clientX;
+                dragStartVal.current = clip.trimStart;
+
+                const handleMouseMove = (ev) => {
+                    const deltaX = ev.clientX - dragStartX.current;
+                    const deltaSeconds = deltaX / pixelsPerSecond;
+                    let newStart = dragStartVal.current + deltaSeconds;
+
+                    // Boundary checks
+                    if (newStart < 0) newStart = 0;
+                    if (newStart > clip.trimEnd - 0.2) newStart = clip.trimEnd - 0.2;
+
+                    onUpdate(index, { trimStart: newStart });
+                };
+
+                const handleMouseUp = () => {
+                    setIsDraggingLeft(false);
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', handleMouseUp);
+                };
+
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+            };
+
+            // Trimming Drag Right (end)
+            const handleRightMouseDown = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setIsDraggingRight(true);
+                dragStartX.current = e.clientX;
+                dragStartVal.current = clip.trimEnd;
+
+                const handleMouseMove = (ev) => {
+                    const deltaX = ev.clientX - dragStartX.current;
+                    const deltaSeconds = deltaX / pixelsPerSecond;
+                    let newEnd = dragStartVal.current + deltaSeconds;
+
+                    // Boundary checks
+                    if (newEnd < clip.trimStart + 0.2) newEnd = clip.trimStart + 0.2;
+                    if (newEnd > clip.duration) newEnd = clip.duration;
+
+                    onUpdate(index, { trimEnd: newEnd });
+                };
+
+                const handleMouseUp = () => {
+                    setIsDraggingRight(false);
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', handleMouseUp);
+                };
+
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+            };
+
+            const duration = clip.trimEnd - clip.trimStart;
+            const blockWidth = duration * pixelsPerSecond;
+
+            return (
+                <div
+                    draggable
+                    onDragStart={(e) => onDragStart(e, index)}
+                    onDragOver={(e) => onDragOver(e, index)}
+                    onDrop={(e) => onDrop(e, index)}
+                    className="relative shrink-0 flex flex-col bg-slate-800/80 border-y border-slate-700 hover:bg-slate-800 hover:border-indigo-500/50 group select-none select-none transition-colors"
+                    style={{ width: `${blockWidth}px` }}
+                >
+                    {/* Header bar / Title info */}
+                    <div className="absolute top-0 left-0 right-0 h-6 px-2 bg-slate-900/90 flex items-center justify-between text-[11px] font-medium border-b border-slate-700/50">
+                        <span className="truncate pr-2 font-semibold text-slate-300">
+                            {clip.filename}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-slate-400 font-mono font-normal">
+                                {duration.toFixed(1)}s
+                            </span>
+                            <button
+                                onClick={() => onDelete(index)}
+                                className="text-slate-500 hover:text-red-400 font-semibold p-0.5 rounded transition"
+                                title="Xóa clip"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" class="w-3.5 h-3.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Waveform Canvas */}
+                    <div className="flex-1 mt-6 relative overflow-hidden">
+                        <canvas ref={canvasRef} className="w-full h-full block opacity-80" />
+
+                        {/* Trim visual labels inside */}
+                        <div className="absolute bottom-1 left-2 text-[9px] text-slate-400 font-mono font-normal pointer-events-none">
+                            L: {clip.trimStart.toFixed(1)}s
+                        </div>
+                        <div className="absolute bottom-1 right-2 text-[9px] text-slate-400 font-mono font-normal pointer-events-none">
+                            R: {clip.trimEnd.toFixed(1)}s
+                        </div>
+                    </div>
+
+                    {/* Left Trim Handle */}
+                    <div
+                        onMouseDown={handleLeftMouseDown}
+                        className={`absolute left-0 top-0 bottom-0 w-2.5 bg-indigo-600 cursor-ew-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-l-md hover:bg-indigo-500 z-10 ${isDraggingLeft ? 'opacity-100 !bg-indigo-400' : ''}`}
+                    >
+                        <div className="w-[1.5px] h-4 bg-white/60"></div>
+                    </div>
+
+                    {/* Right Trim Handle */}
+                    <div
+                        onMouseDown={handleRightMouseDown}
+                        className={`absolute right-0 top-0 bottom-0 w-2.5 bg-indigo-600 cursor-ew-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-r-md hover:bg-indigo-500 z-10 ${isDraggingRight ? 'opacity-100 !bg-indigo-400' : ''}`}
+                    >
+                        <div className="w-[1.5px] h-4 bg-white/60"></div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App Component ---
+        const App = () => {
+            const [folderPath, setFolderPath] = useState('');
+            const [isScanned, setIsScanned] = useState(false);
+            const [audioFiles, setAudioFiles] = useState([]);
+            const [clips, setClips] = useState([]);
+            const [pixelsPerSecond, setPixelsPerSecond] = useState(30); // zoom
+            const [playheadTime, setPlayheadTime] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isExporting, setIsExporting] = useState(false);
+            const [exportResult, setExportResult] = useState(null);
+
+            const [isSaving, setIsSaving] = useState(false);
+            const [saveMsg, setSaveMsg] = useState('');
+
+            // Web Audio Refs
+            const activeSourcesRef = useRef([]);
+            const playbackStartTimeRef = useRef(0);
+            const startPlayheadTimeRef = useRef(0);
+            const animationFrameRef = useRef(null);
+            const isPlayingRef = useRef(false);
+
+            const timelineRef = useRef(null);
+            const rulerRef = useRef(null);
+
+            // Loaded & Loading audio states for timeline decoding
+            const [loadedIds, setLoadedIds] = useState(new Set());
+            const [loadingIds, setLoadingIds] = useState(new Set());
+
+            const addLoadedId = (id) => {
+                setLoadedIds(prev => {
+                    const newSet = new Set(prev);
+                    newSet.add(id);
+                    return newSet;
+                });
+            };
+
+            const ensureAudioDecoded = async (audioId) => {
+                if (audioBuffersCache[audioId]) {
+                    addLoadedId(audioId);
+                    return;
+                }
+                if (loadingIds.has(audioId)) return;
+
+                setLoadingIds(prev => {
+                    const newSet = new Set(prev);
+                    newSet.add(audioId);
+                    return newSet;
+                });
+
+                try {
+                    const ctx = getAudioContext();
+                    const res = await fetch(`/api/audio-editor/stream?id=${audioId}`);
+                    const arrayBuffer = await res.arrayBuffer();
+                    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+                    audioBuffersCache[audioId] = audioBuffer;
+                    addLoadedId(audioId);
+                } catch (e) {
+                    console.error("Error decoding:", e);
+                } finally {
+                    setLoadingIds(prev => {
+                        const newSet = new Set(prev);
+                        newSet.delete(audioId);
+                        return newSet;
+                    });
+                }
+            };
+
+            useEffect(() => {
+                clips.forEach(clip => {
+                    ensureAudioDecoded(clip.audioId);
+                });
+            }, [clips]);
+
+            // Compute total timeline duration
+            const totalDuration = useMemo(() => {
+                return clips.reduce((sum, c) => sum + (c.trimEnd - c.trimStart), 0);
+            }, [clips]);
+
+            const downloadFilenameBase = useMemo(() => {
+                if (clips.length === 0) return 'final_audio';
+                const names = clips.map(c => {
+                    const lastDot = c.filename.lastIndexOf('.');
+                    return lastDot !== -1 ? c.filename.substring(0, lastDot) : c.filename;
+                });
+                return names.join('_');
+            }, [clips]);
+
+            const isAnyClipLoading = useMemo(() => {
+                return clips.some(c => !loadedIds.has(c.audioId));
+            }, [clips, loadedIds]);
+
+            // Sync plays/pause state with ref
+            useEffect(() => {
+                isPlayingRef.current = isPlaying;
+            }, [isPlaying]);
+
+            // Clean up playback on unmount
+            useEffect(() => {
+                return () => {
+                    stopAllAudio();
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                    }
+                };
+            }, []);
+
+            // Folder scan call
+            const browseFolder = async () => {
+                try {
+                    const res = await fetch("/api/browse-folder", { method: "POST" });
+                    const data = await res.json();
+                    if (data.path) {
+                        setFolderPath(data.path);
+                        scanFolder(data.path);
+                    }
+                } catch (e) {
+                    console.error("Browse folder error:", e);
+                }
+            };
+
+            const scanFolder = async (path = folderPath) => {
+                if (!path.trim()) {
+                    alert("Vui lòng chọn thư mục.");
+                    return;
+                }
+                try {
+                    const res = await fetch(`/api/audio-editor/files?folder=${encodeURIComponent(path.trim())}`);
+                    const files = await res.json();
+                    if (files.error) {
+                        alert(files.error);
+                        return;
+                    }
+                    setAudioFiles(files);
+                    setIsScanned(true);
+                } catch (e) {
+                    alert("Lỗi quét thư mục: " + e.message);
+                }
+            };
+
+            // Drag and drop from library to timeline
+            const handleAddToTimeline = (audioId, filename, duration) => {
+                const newClip = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    audioId,
+                    filename,
+                    duration,
+                    trimStart: 0,
+                    trimEnd: duration
+                };
+                setClips([...clips, newClip]);
+            };
+
+            const handleTimelineDrop = (e) => {
+                e.preventDefault();
+                const audioId = e.dataTransfer.getData("audioId");
+                const filename = e.dataTransfer.getData("filename");
+                const durationStr = e.dataTransfer.getData("duration");
+                if (audioId) {
+                    handleAddToTimeline(audioId, filename, parseFloat(durationStr));
+                }
+            };
+
+            // Clip handlers
+            const handleUpdateClip = (index, updatedFields) => {
+                const newClips = [...clips];
+                newClips[index] = { ...newClips[index], ...updatedFields };
+                setClips(newClips);
+            };
+
+            const handleDeleteClip = (index) => {
+                const newClips = [...clips];
+                newClips.splice(index, 1);
+                setClips(newClips);
+            };
+
+            // Reorder Drag & Drop Handlers
+            const handleDragStart = (e, index) => {
+                e.dataTransfer.setData("text/plain", index);
+            };
+
+            const handleDragOver = (e) => {
+                e.preventDefault();
+            };
+
+            const handleDrop = (e, targetIndex) => {
+                e.preventDefault();
+                const sourceIndexStr = e.dataTransfer.getData("text/plain");
+                if (sourceIndexStr !== "") {
+                    const sourceIndex = parseInt(sourceIndexStr);
+                    const newClips = [...clips];
+                    const [removed] = newClips.splice(sourceIndex, 1);
+                    newClips.splice(targetIndex, 0, removed);
+                    setClips(newClips);
+                }
+            };
+
+            // --- Playback Logic ---
+            const stopAllAudio = () => {
+                activeSourcesRef.current.forEach(source => {
+                    try {
+                        source.stop();
+                    } catch (e) { }
+                });
+                activeSourcesRef.current = [];
+            };
+
+            const handlePlayPause = () => {
+                if (isPlaying) {
+                    // Pause
+                    stopAllAudio();
+                    setIsPlaying(false);
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                    }
+                } else {
+                    // Play
+                    if (clips.length === 0) return;
+
+                    const ctx = getAudioContext();
+                    const now = ctx.currentTime;
+                    stopAllAudio();
+
+                    // If playhead is at the end, wrap to beginning
+                    let currentPlayTime = playheadTime;
+                    if (currentPlayTime >= totalDuration) {
+                        currentPlayTime = 0;
+                        setPlayheadTime(0);
+                    }
+
+                    const sources = [];
+                    let currentTimelineStart = 0;
+
+                    clips.forEach(clip => {
+                        const clipDur = clip.trimEnd - clip.trimStart;
+                        const timelineEnd = currentTimelineStart + clipDur;
+
+                        if (timelineEnd > currentPlayTime) {
+                            const buffer = audioBuffersCache[clip.audioId];
+                            if (buffer) {
+                                const source = ctx.createBufferSource();
+                                source.buffer = buffer;
+                                source.connect(ctx.destination);
+
+                                let startOffset = clip.trimStart;
+                                let playDuration = clipDur;
+                                let scheduleTime = now;
+
+                                if (currentTimelineStart < currentPlayTime) {
+                                    // Start playing in the middle of this clip
+                                    const elapsedInClip = currentPlayTime - currentTimelineStart;
+                                    startOffset += elapsedInClip;
+                                    playDuration -= elapsedInClip;
+                                    scheduleTime = now;
+                                } else {
+                                    // Start playing at the beginning of this clip in the future
+                                    scheduleTime = now + (currentTimelineStart - currentPlayTime);
+                                }
+
+                                source.start(scheduleTime, startOffset, playDuration);
+                                sources.push(source);
+                            }
+                        }
+                        currentTimelineStart = timelineEnd;
+                    });
+
+                    activeSourcesRef.current = sources;
+                    playbackStartTimeRef.current = now;
+                    startPlayheadTimeRef.current = currentPlayTime;
+                    setIsPlaying(true);
+
+                    // Start animation frame loop
+                    const updatePlayhead = () => {
+                        if (!isPlayingRef.current) return;
+                        const elapsed = ctx.currentTime - playbackStartTimeRef.current;
+                        const currentPos = startPlayheadTimeRef.current + elapsed;
+
+                        if (currentPos >= totalDuration) {
+                            setIsPlaying(false);
+                            setPlayheadTime(0);
+                        } else {
+                            setPlayheadTime(currentPos);
+                            animationFrameRef.current = requestAnimationFrame(updatePlayhead);
+                        }
+                    };
+                    animationFrameRef.current = requestAnimationFrame(updatePlayhead);
+                }
+            };
+
+            const handleStop = () => {
+                stopAllAudio();
+                setIsPlaying(false);
+                setPlayheadTime(0);
+                if (animationFrameRef.current) {
+                    cancelAnimationFrame(animationFrameRef.current);
+                }
+            };
+
+            const handleRestart = () => {
+                stopAllAudio();
+                setPlayheadTime(0);
+                if (isPlaying) {
+                    setIsPlaying(false);
+                    setTimeout(() => {
+                        handlePlayPause();
+                    }, 50);
+                }
+            };
+
+            // Scrubbing & seeking playhead
+            const seekToTime = (targetTime, resumePlayback) => {
+                setPlayheadTime(targetTime);
+
+                if (resumePlayback) {
+                    stopAllAudio();
+                    setIsPlaying(false);
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                    }
+                    setTimeout(() => {
+                        const ctx = getAudioContext();
+                        const now = ctx.currentTime;
+                        playbackStartTimeRef.current = now;
+                        startPlayheadTimeRef.current = targetTime;
+
+                        const sources = [];
+                        let currentTimelineStart = 0;
+
+                        clips.forEach(clip => {
+                            const clipDur = clip.trimEnd - clip.trimStart;
+                            const timelineEnd = currentTimelineStart + clipDur;
+
+                            if (timelineEnd > targetTime) {
+                                const buffer = audioBuffersCache[clip.audioId];
+                                if (buffer) {
+                                    const source = ctx.createBufferSource();
+                                    source.buffer = buffer;
+                                    source.connect(ctx.destination);
+
+                                    let startOffset = clip.trimStart;
+                                    let playDuration = clipDur;
+                                    let scheduleTime = now;
+
+                                    if (currentTimelineStart < targetTime) {
+                                        const elapsedInClip = targetTime - currentTimelineStart;
+                                        startOffset += elapsedInClip;
+                                        playDuration -= elapsedInClip;
+                                        scheduleTime = now;
+                                    } else {
+                                        scheduleTime = now + (currentTimelineStart - targetTime);
+                                    }
+
+                                    source.start(scheduleTime, startOffset, playDuration);
+                                    sources.push(source);
+                                }
+                            }
+                            currentTimelineStart = timelineEnd;
+                        });
+
+                        activeSourcesRef.current = sources;
+                        setIsPlaying(true);
+
+                        const updatePlayhead = () => {
+                            if (!isPlayingRef.current) return;
+                            const elapsed = ctx.currentTime - playbackStartTimeRef.current;
+                            const currentPos = startPlayheadTimeRef.current + elapsed;
+
+                            if (currentPos >= totalDuration) {
+                                setIsPlaying(false);
+                                setPlayheadTime(0);
+                            } else {
+                                setPlayheadTime(currentPos);
+                                animationFrameRef.current = requestAnimationFrame(updatePlayhead);
+                            }
+                        };
+                        animationFrameRef.current = requestAnimationFrame(updatePlayhead);
+                    }, 50);
+                } else {
+                    stopAllAudio();
+                    setIsPlaying(false);
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                    }
+                }
+            };
+
+            const handleRulerMouseDown = (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+
+                const ruler = rulerRef.current;
+                if (!ruler) return;
+
+                const wasPlaying = isPlayingRef.current;
+                if (wasPlaying) {
+                    stopAllAudio();
+                    setIsPlaying(false);
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                    }
+                }
+
+                const updatePlayheadFromEvent = (ev) => {
+                    const rect = ruler.getBoundingClientRect();
+                    const clickX = ev.clientX - rect.left;
+                    const time = clickX / pixelsPerSecond;
+                    const targetTime = Math.min(totalDuration, Math.max(0, time));
+                    setPlayheadTime(targetTime);
+                };
+
+                updatePlayheadFromEvent(e);
+
+                const handleMouseMove = (ev) => {
+                    updatePlayheadFromEvent(ev);
+                };
+
+                const handleMouseUp = (ev) => {
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', handleMouseUp);
+
+                    const rect = ruler.getBoundingClientRect();
+                    const clickX = ev.clientX - rect.left;
+                    const time = clickX / pixelsPerSecond;
+                    const targetTime = Math.min(totalDuration, Math.max(0, time));
+
+                    seekToTime(targetTime, wasPlaying);
+                };
+
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+            };
+
+            // --- Export API call ---
+            const handleExport = async () => {
+                if (clips.length === 0) {
+                    alert("Không có clip nào để xuất.");
+                    return;
+                }
+                setIsExporting(true);
+                setExportResult(null);
+
+                const payload = {
+                    folder: folderPath.trim(),
+                    clips: clips.map(c => ({
+                        audioId: c.audioId,
+                        trimStart: c.trimStart,
+                        trimEnd: c.trimEnd
+                    }))
+                };
+
+                try {
+                    const res = await fetch("/api/audio-editor/export", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (data.error) {
+                        alert("Lỗi xuất âm thanh: " + data.error);
+                    } else {
+                        setExportResult(data);
+                    }
+                } catch (e) {
+                    alert("Lỗi kết nối đến máy chủ: " + e.message);
+                } finally {
+                    setIsExporting(false);
+                }
+            };
+
+            // --- Save & Load Project ---
+            const handleSaveProject = async () => {
+                if (clips.length === 0) {
+                    alert("Không có clip nào để lưu dự án.");
+                    return;
+                }
+                
+                try {
+                    setIsSaving(true);
+                    setSaveMsg('');
+                    
+                    // 1. Open native file dialog via backend
+                    const browseRes = await fetch("/api/audio-editor/browse-save-project", {
+                        method: "POST"
+                    });
+                    const browseData = await browseRes.json();
+                    
+                    if (browseData.error) {
+                        alert("Lỗi mở hộp thoại lưu: " + browseData.error);
+                        return;
+                    }
+                    if (!browseData.path) {
+                        return; // User cancelled
+                    }
+                    
+                    const projectPath = browseData.path;
+                    
+                    // 2. Save the project to the selected path
+                    const payload = {
+                        project_path: projectPath,
+                        clips: clips.map(c => ({
+                            audioId: c.audioId,
+                            trimStart: c.trimStart,
+                            trimEnd: c.trimEnd
+                        }))
+                    };
+                    
+                    const res = await fetch("/api/audio-editor/save-project", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setSaveMsg(`Đã lưu: ${projectPath.split('/').pop()}`);
+                        setTimeout(() => setSaveMsg(''), 4000);
+                        alert(`Đã lưu dự án thành công tại:\n${projectPath}`);
+                    } else {
+                        alert(`Lỗi lưu dự án: ${data.detail || data.error}`);
+                    }
+                } catch (e) {
+                    alert(`Lỗi kết nối: ${e.message}`);
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const handleLoadProject = async () => {
+                try {
+                    // 1. Open native file open dialog via backend
+                    const browseRes = await fetch("/api/audio-editor/browse-load-project", {
+                        method: "POST"
+                    });
+                    const browseData = await browseRes.json();
+                    
+                    if (browseData.error) {
+                        alert("Lỗi mở hộp thoại tải: " + browseData.error);
+                        return;
+                    }
+                    if (!browseData.path) {
+                        return; // User cancelled
+                    }
+                    
+                    const projectPath = browseData.path;
+                    
+                    // 2. Load the project from the selected path
+                    const res = await fetch(`/api/audio-editor/load-project?path=${encodeURIComponent(projectPath)}`);
+                    const data = await res.json();
+                    if (res.status === 404) {
+                        alert("Không tìm thấy file dự án!");
+                        return;
+                    }
+                    if (data.success) {
+                        // Decode all files for timeline in background
+                        const ctx = getAudioContext();
+                        const newClips = [];
+
+                        for (const clip of data.clips) {
+                            if (!audioBuffersCache[clip.audioId]) {
+                                try {
+                                    const fileRes = await fetch(`/api/audio-editor/stream?id=${clip.audioId}`);
+                                    const arrayBuffer = await fileRes.arrayBuffer();
+                                    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+                                    audioBuffersCache[clip.audioId] = audioBuffer;
+                                } catch (e) {
+                                    console.error("Decode during load failed:", e);
+                                }
+                            }
+                            newClips.push({
+                                id: Math.random().toString(36).substr(2, 9),
+                                audioId: clip.audioId,
+                                filename: clip.filename,
+                                duration: clip.duration,
+                                trimStart: clip.trimStart,
+                                trimEnd: clip.trimEnd
+                            });
+                        }
+                        setClips(newClips);
+                        
+                        // Automatically update working directory and scan it
+                        if (data.folder) {
+                            setFolderPath(data.folder);
+                            scanFolder(data.folder);
+                        }
+                        
+                        alert("Đã tải cấu hình dự án thành công!");
+                    } else {
+                        alert(`Lỗi tải dự án: ${data.detail || data.error}`);
+                    }
+                } catch (e) {
+                    alert(`Tải dự án thất bại: ${e.message}`);
+                }
+            };
+
+            return (
+                <div className="flex-1 flex flex-col">
+                    {/* Header */}
+                    <header className="glass-panel border-b py-4 px-6 flex items-center justify-between sticky top-0 z-50 rounded-b-xl">
+                        <div className="flex items-center gap-3">
+                            <span className="text-xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent font-outfit">
+                                🎬 Audio Merge & Timeline Editor
+                            </span>
+                            <span className="px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded bg-indigo-500/20 text-indigo-300">
+                                Integrated
+                            </span>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <a
+                                href="/"
+                                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-2"
+                            >
+                                🎙️ Studio Home
+                            </a>
+                        </div>
+                    </header>
+
+                    {/* Main workspace */}
+                    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
+
+                        {/* Left Side: Audio Folder Selection & Library */}
+                        <div className="lg:col-span-4 flex flex-col gap-4">
+                            <div className="glass-panel p-4 rounded-xl flex flex-col gap-3">
+                                <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
+                                    📂 Thư mục làm việc
+                                </h3>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Đường dẫn thư mục âm thanh..."
+                                        value={folderPath}
+                                        onChange={(e) => setFolderPath(e.target.value)}
+                                        className="flex-1 text-xs px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 focus:outline-none focus:border-indigo-500 font-mono"
+                                    />
+                                    <button
+                                        onClick={browseFolder}
+                                        className="px-3 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold shrink-0 transition"
+                                    >
+                                        🔍 Finder
+                                    </button>
+                                </div>
+                                <button
+                                    onClick={() => scanFolder()}
+                                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-indigo-500/50 rounded-lg text-xs font-semibold transition"
+                                >
+                                    Quét & Tải danh sách file
+                                </button>
+                            </div>
+
+                            {/* Audio Library Panel */}
+                            <div className="glass-panel p-4 rounded-xl flex-1 flex flex-col min-h-[300px]">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
+                                        🎵 Thư viện Âm thanh
+                                    </h3>
+                                    <span className="text-[10px] text-slate-400 font-mono px-2 py-0.5 bg-slate-950 rounded">
+                                        {audioFiles.length} files
+                                    </span>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[450px]">
+                                    {!isScanned ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-10">
+                                            <p className="text-xs">Chưa quét thư mục âm thanh.</p>
+                                            <p className="text-[10px] mt-1">Hãy nhập đường dẫn và nhấn Quét phía trên.</p>
+                                        </div>
+                                    ) : audioFiles.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-10">
+                                            <p className="text-xs">Không tìm thấy file âm thanh nào.</p>
+                                            <p className="text-[10px] mt-1">Hỗ trợ: wav, mp3, m4a, ogg.</p>
+                                        </div>
+                                    ) : (
+                                        audioFiles.map(file => (
+                                            <LibraryItem
+                                                key={file.id}
+                                                file={file}
+                                                onAddToTimeline={handleAddToTimeline}
+                                                audioCtx={getAudioContext()}
+                                                audioBuffersCache={audioBuffersCache}
+                                            />
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Right Side: Timeline & Editor Controls */}
+                        <div className="lg:col-span-8 flex flex-col gap-6">
+
+                            {/* Controls and Metadata Info */}
+                            <div className="glass-panel p-4 rounded-xl flex flex-wrap items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                    {/* Playback Buttons */}
+                                    <button
+                                        onClick={handleRestart}
+                                        className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 text-xs transition"
+                                        title="Quay lại đầu (0s)"
+                                    >
+                                        ⏪
+                                    </button>
+                                    <button
+                                        onClick={handlePlayPause}
+                                        disabled={clips.length === 0 || isAnyClipLoading}
+                                        className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${isPlaying ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white'}`}
+                                    >
+                                        {isAnyClipLoading ? '⏳ Đang tải...' : isPlaying ? '⏸️ Tạm dừng' : '▶️ Phát thử'}
+                                    </button>
+                                    <button
+                                        onClick={handleStop}
+                                        className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 text-xs transition"
+                                        title="Dừng phát"
+                                    >
+                                        ⏹️
+                                    </button>
+
+                                    {/* Playback time indicator */}
+                                    <div className="text-xs font-mono bg-slate-950 px-3 py-2 rounded-lg border border-slate-800 text-slate-300">
+                                        <span className="text-indigo-400 font-bold">{playheadTime.toFixed(2)}s</span> / {totalDuration.toFixed(2)}s
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    {/* Zoom Control */}
+                                    <span className="text-xs text-slate-400">Thu phóng:</span>
+                                    <input
+                                        type="range"
+                                        min="15"
+                                        max="100"
+                                        value={pixelsPerSecond}
+                                        onChange={(e) => setPixelsPerSecond(parseInt(e.target.value))}
+                                        className="w-20 accent-indigo-500"
+                                    />
+                                    <span className="text-[10px] font-mono text-slate-500 w-8">{pixelsPerSecond}px/s</span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    {/* Project Save/Load */}
+                                    <button
+                                        onClick={handleLoadProject}
+                                        className="px-3 py-1.5 bg-slate-800 border border-slate-700 hover:border-indigo-500 text-xs rounded-lg transition text-slate-300 hover:text-white"
+                                    >
+                                        📂 Tải Dự án
+                                    </button>
+                                    <div className="relative flex items-center">
+                                        <button
+                                            onClick={handleSaveProject}
+                                            disabled={clips.length === 0}
+                                            className="px-3 py-1.5 bg-slate-800 border border-slate-700 hover:border-indigo-500 disabled:opacity-40 text-xs rounded-lg transition text-slate-300 hover:text-white"
+                                        >
+                                            💾 Lưu Dự án
+                                        </button>
+                                        {saveMsg && (
+                                            <span className="absolute -bottom-6 left-0 right-0 text-center text-[10px] text-emerald-400 font-mono">
+                                                {saveMsg}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Timeline Canvas Container */}
+                            <div className="glass-panel rounded-xl overflow-hidden flex flex-col flex-1">
+                                <div className="bg-slate-900/90 border-b border-white/5 py-2 px-4 flex items-center justify-between text-xs text-slate-400">
+                                    <span className="font-semibold text-slate-300">Dòng thời gian (Timeline)</span>
+                                    <span className="text-[10px] text-slate-500">Mẹo: Kéo thả các clip để sắp xếp thứ tự</span>
+                                </div>
+
+                                {/* Timeline Ruler and Track scrollable container */}
+                                <div
+                                    ref={timelineRef}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={handleTimelineDrop}
+                                    className="flex-1 overflow-x-auto overflow-y-hidden p-6 relative bg-slate-950/40 select-none min-h-[220px]"
+                                >
+                                    {/* Scrollable area width */}
+                                    <div
+                                        style={{ width: `${Math.max(400, totalDuration * pixelsPerSecond + 100)}px` }}
+                                        className="relative h-full flex flex-col justify-start"
+                                    >
+                                        {/* Ruler Header (Ticks) */}
+                                        <div
+                                            ref={rulerRef}
+                                            onMouseDown={handleRulerMouseDown}
+                                            className="h-6 w-full border-b border-slate-800/80 relative cursor-pointer mb-4"
+                                        >
+                                            {Array.from({ length: Math.ceil(totalDuration) + 10 }).map((_, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    className="absolute bottom-0 border-l border-slate-700/60 font-mono text-[9px] text-slate-500 pl-1"
+                                                    style={{ left: `${idx * pixelsPerSecond}px`, height: idx % 5 === 0 ? '12px' : '6px' }}
+                                                >
+                                                    {idx % 5 === 0 ? `${idx}s` : ''}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Audio Track Block */}
+                                        <div className="relative h-32 w-full flex items-stretch bg-slate-900/10 border border-dashed border-slate-800/60 rounded-lg overflow-hidden">
+                                            {clips.length === 0 ? (
+                                                <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs">
+                                                    Kéo thả file âm thanh từ Thư viện vào đây để bắt đầu ghép
+                                                </div>
+                                            ) : (
+                                                clips.map((clip, index) => (
+                                                    <AudioClip
+                                                        key={clip.id}
+                                                        clip={clip}
+                                                        index={index}
+                                                        onUpdate={handleUpdateClip}
+                                                        onDelete={handleDeleteClip}
+                                                        onDragStart={handleDragStart}
+                                                        onDragOver={handleDragOver}
+                                                        onDrop={handleDrop}
+                                                        pixelsPerSecond={pixelsPerSecond}
+                                                        isLoaded={loadedIds.has(clip.audioId)}
+                                                    />
+                                                ))
+                                            )}
+                                        </div>
+
+                                        {/* Draggable Playhead Cursor */}
+                                        <div
+                                            className="absolute top-0 bottom-0 w-[2px] bg-red-500 accent-glow z-20 pointer-events-none"
+                                            style={{ left: `${playheadTime * pixelsPerSecond}px` }}
+                                        >
+                                            <div
+                                                onMouseDown={handleRulerMouseDown}
+                                                className="w-3 h-3 bg-red-500 rounded-full -ml-[5px] -mt-1 shadow-md cursor-ew-resize pointer-events-auto"
+                                                title="Kéo để di chuyển thanh thời gian"
+                                            ></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Export Modal / Actions */}
+                            <div className="glass-panel p-4 rounded-xl flex items-center justify-between gap-4">
+                                <div className="text-xs text-slate-400">
+                                    <p>📌 Xuất ra các file:</p>
+                                    <p className="font-mono text-slate-200 mt-0.5">final_audio.wav, final_audio.mp3</p>
+                                </div>
+                                <button
+                                    onClick={handleExport}
+                                    disabled={isExporting || clips.length === 0}
+                                    className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold rounded-lg text-xs transition duration-200 disabled:opacity-50 flex items-center gap-2 shadow-lg"
+                                >
+                                    {isExporting ? (
+                                        <>
+                                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Đang xử lý ghép bằng FFmpeg...
+                                        </>
+                                    ) : '🚀 Tạo file âm thanh hoàn chỉnh'}
+                                </button>
+                            </div>
+
+                            {/* Export Results Display */}
+                            {exportResult && (
+                                <div className="glass-panel p-4 rounded-xl border-indigo-500/30 flex flex-col gap-3 animate-fadeIn">
+                                    <h4 className="text-sm font-semibold text-emerald-400 flex items-center gap-1.5">
+                                        🎉 Xuất âm thanh thành công!
+                                    </h4>
+                                    <p className="text-xs text-slate-400">
+                                        Các file âm thanh đã được lưu vào thư mục làm việc của bạn. Bạn có thể nghe thử hoặc tải về:
+                                    </p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                        <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2">
+                                            <span className="text-xs font-semibold text-slate-300">🎵 Định dạng WAV (Chất lượng cao)</span>
+                                            <audio controls src={exportResult.wav_url} className="w-full h-8 mt-1" />
+                                            <a
+                                                href={exportResult.wav_url}
+                                                download={`${downloadFilenameBase}.wav`}
+                                                className="text-center py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 text-xs transition font-semibold"
+                                            >
+                                                💾 Tải xuống WAV
+                                            </a>
+                                        </div>
+                                        <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2">
+                                            <span className="text-xs font-semibold text-slate-300">🎵 Định dạng MP3 (Dung lượng nhẹ)</span>
+                                            <audio controls src={exportResult.mp3_url} className="w-full h-8 mt-1" />
+                                            <a
+                                                href={exportResult.mp3_url}
+                                                download={`${downloadFilenameBase}.mp3`}
+                                                className="text-center py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 text-xs transition font-semibold"
+                                            >
+                                                💾 Tải xuống MP3
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                        </div>
+                    </div>
+
+                    {/* Load Project Modal Removed */}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>

@@ -12,8 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydub import AudioSegment
 from omnivoice import OmniVoice
 import librosa
+from routes import audio_editor
 
 app = FastAPI(title="KhanhTTS OmniVoice Studio")
+app.include_router(audio_editor.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -357,6 +359,23 @@ HTML_CONTENT = """
             border-color: var(--danger);
         }
 
+        .btn-sm-secondary {
+            background: transparent;
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-sm-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
         audio {
             width: 100%;
             height: 32px;
@@ -596,6 +615,11 @@ HTML_CONTENT = """
     <header>
         <h1>Hẹ Hẹ hẹ</h1>
         <p>Ứng dụng nhân bản giọng nói và tạo âm thanh hàng loạt trực quan</p>
+        <div style="margin-top: 1rem; display: flex; justify-content: center; gap: 1rem;">
+            <a href="/audio-editor" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: var(--accent); color: var(--text-primary); text-decoration: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; border: 1px solid var(--glass-border); transition: background 0.2s;" onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='var(--accent)'">
+                🎬 Trình ghép & Chỉnh sửa âm thanh (Audio Editor)
+            </a>
+        </div>
     </header>
 
     <div class="tabs-nav-wrapper">
@@ -1144,8 +1168,8 @@ HTML_CONTENT = """
                 </div>
 
                 <!-- Right Panel: Audio Management -->
-                <div class="panel">
-                    <div class="form-group">
+                <div class="panel" style="height: 100%; min-height: 0;">
+                    <div class="form-group" style="flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 0.5rem;">
                         <div class="manager-header">
                             <label>Các file đã tạo trong thư mục</label>
                             <div style="display: flex; gap: 0.5rem;">
@@ -1154,7 +1178,7 @@ HTML_CONTENT = """
                             </div>
                         </div>
                         <input type="text" id="search-files-${tab.id}" class="search-files" placeholder="🔍 Tìm kiếm file nhanh..." style="margin-top: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.85rem;" oninput="filterFilesList('${tab.id}')">
-                        <div id="file-list-container-${tab.id}" class="file-list">
+                        <div id="file-list-container-${tab.id}" class="file-list" style="flex: 1; max-height: none; overflow-y: auto;">
                             <div class="empty-state">Nhập thư mục để tải danh sách file âm thanh.</div>
                         </div>
                     </div>
@@ -1507,21 +1531,107 @@ HTML_CONTENT = """
                 
                 const info = document.createElement('div');
                 info.className = 'file-info';
+                info.style.display = 'flex';
+                info.style.alignItems = 'center';
+                info.style.justifyContent = 'space-between';
+                info.style.gap = '0.5rem';
+                info.style.width = '100%';
                 
                 const name = document.createElement('span');
                 name.className = 'file-name';
                 name.textContent = file.name;
+                name.style.flex = '1';
+                name.style.wordBreak = 'break-all';
+                
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.value = file.name;
+                nameInput.className = 'rename-input';
+                nameInput.style.display = 'none';
+                nameInput.style.flex = '1';
+                nameInput.style.fontSize = '0.85rem';
+                nameInput.style.padding = '0.2rem 0.4rem';
+                nameInput.style.background = 'rgba(15, 23, 42, 0.8)';
+                nameInput.style.border = '1px solid var(--glass-border)';
+                nameInput.style.borderRadius = '4px';
+                nameInput.style.color = 'var(--text-primary)';
+                nameInput.style.outline = 'none';
                 
                 const actions = document.createElement('div');
                 actions.className = 'file-actions';
+                actions.style.display = 'flex';
+                actions.style.gap = '0.25rem';
+                
+                const renameBtn = document.createElement('button');
+                renameBtn.className = 'btn-sm-secondary';
+                renameBtn.textContent = 'Sửa';
+                
+                const saveRename = async () => {
+                    const newName = nameInput.value.trim();
+                    if (!newName) {
+                        alert("Tên file không được để trống!");
+                        return;
+                    }
+                    if (newName === file.name) {
+                        name.style.display = 'block';
+                        nameInput.style.display = 'none';
+                        renameBtn.textContent = 'Sửa';
+                        return;
+                    }
+                    try {
+                        const res = await fetch('/api/rename-audio', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: file.path, new_name: newName })
+                        });
+                        const result = await res.json();
+                        if (result.success) {
+                            loadFilesForTab(tabId);
+                        } else {
+                            alert("Không thể đổi tên: " + result.error);
+                        }
+                    } catch (e) {
+                        alert("Lỗi đổi tên: " + e.message);
+                    }
+                };
+                
+                renameBtn.onclick = () => {
+                    if (nameInput.style.display === 'none') {
+                        name.style.display = 'none';
+                        nameInput.style.display = 'block';
+                        nameInput.focus();
+                        const dotIndex = file.name.lastIndexOf('.');
+                        if (dotIndex !== -1) {
+                            nameInput.setSelectionRange(0, dotIndex);
+                        } else {
+                            nameInput.select();
+                        }
+                        renameBtn.textContent = 'Lưu';
+                    } else {
+                        saveRename();
+                    }
+                };
+                
+                nameInput.onkeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        saveRename();
+                    } else if (e.key === 'Escape') {
+                        nameInput.value = file.name;
+                        name.style.display = 'block';
+                        nameInput.style.display = 'none';
+                        renameBtn.textContent = 'Sửa';
+                    }
+                };
                 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'btn-sm-danger';
                 deleteBtn.textContent = 'Xóa';
                 deleteBtn.onclick = () => deleteFileForTab(tabId, file.path);
                 
+                actions.appendChild(renameBtn);
                 actions.appendChild(deleteBtn);
                 info.appendChild(name);
+                info.appendChild(nameInput);
                 info.appendChild(actions);
                 
                 const audio = document.createElement('audio');
@@ -1927,6 +2037,15 @@ HTML_CONTENT = """
 async def index():
     return HTML_CONTENT
 
+@app.get("/audio-editor", response_class=HTMLResponse)
+async def audio_editor_page():
+    template_path = os.path.join(BASE_DIR, "templates", "audio_editor.html")
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content=content)
+    raise HTTPException(status_code=404, detail="Template not found")
+
 @app.post("/api/browse-folder")
 async def browse_folder():
     try:
@@ -1950,13 +2069,24 @@ async def get_metadata():
     folders = []
     samples = []
     
-    for item in os.listdir(BASE_DIR):
+    # Only allow "Audio sample", "Kết quả" and subfolders of "Kết quả"
+    allowed_base_folders = ["Audio sample", "Kết quả"]
+    for item in allowed_base_folders:
         full_path = os.path.join(BASE_DIR, item)
-        if os.path.isdir(full_path) and not item.startswith(".") and item not in ["tts_env", "__pycache__", "khanhtts_model"]:
+        if os.path.isdir(full_path):
             folders.append({
                 "name": item,
                 "path": full_path
             })
+            
+            if item == "Kết quả":
+                for subitem in os.listdir(full_path):
+                    sub_path = os.path.join(full_path, subitem)
+                    if os.path.isdir(sub_path) and not subitem.startswith("."):
+                        folders.append({
+                            "name": f"Kết quả / {subitem}",
+                            "path": sub_path
+                        })
             
     sample_dir = os.path.join(BASE_DIR, "Audio sample")
     if os.path.exists(sample_dir):
@@ -2072,6 +2202,39 @@ async def clear_all(folder: str):
         return {"success": False, "error": str(e)}
 
 from pydantic import BaseModel
+
+class RenameRequest(BaseModel):
+    path: str
+    new_name: str
+
+@app.post("/api/rename-audio")
+async def rename_audio(req: RenameRequest):
+    old_path = os.path.abspath(req.path)
+    new_filename = req.new_name.strip()
+    
+    if not (old_path.lower().endswith(".wav") or old_path.lower().endswith(".mp3")):
+        raise HTTPException(status_code=403, detail="Định dạng file không được phép")
+    if not os.path.exists(old_path):
+        raise HTTPException(status_code=404, detail="Không tìm thấy file nguồn")
+    if not new_filename:
+        raise HTTPException(status_code=400, detail="Tên file mới không được để trống")
+        
+    ext = os.path.splitext(old_path)[1].lower()
+    if not new_filename.lower().endswith(ext):
+        new_filename += ext
+        
+    parent_dir = os.path.dirname(old_path)
+    new_path = os.path.join(parent_dir, new_filename)
+    
+    if os.path.exists(new_path) and new_path != old_path:
+        raise HTTPException(status_code=400, detail="File mới đã tồn tại")
+        
+    try:
+        os.rename(old_path, new_path)
+        return {"success": True, "new_path": new_path, "new_name": new_filename}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 class GenerateRequest(BaseModel):
     sentences: str
     folder: str
@@ -2140,33 +2303,60 @@ async def generate_voice(req: GenerateRequest):
                             break
                         counter += 1
                 
-                # Chuẩn hóa dấu ba chấm (...) và ellipsis (…) thành dấu phẩy (,) để tránh model bỏ chữ/hallucinate
-                cau_co_moi = text.replace("…", ", ").replace("...", ", ")
-                cau_co_moi = re.sub(r',\s*,', ',', cau_co_moi)
-                cau_co_moi = re.sub(r'\s+', ' ', cau_co_moi).strip()
-                
+                # Tách câu theo các dấu kết thúc câu (. ! ?) để tránh model bị nuốt chữ hoặc dừng sớm
                 loop = asyncio.get_event_loop()
                 def run_gen():
-                    if req.speed_method == "model":
-                        gen_kwargs = {}
-                        if req.speed and req.speed != 1.0:
-                            gen_kwargs["speed"] = req.speed
-                        audio = model_instance.generate(
-                            text=cau_co_moi,
-                            ref_audio=wav_sample,
-                            ref_text=req.ref_text,
-                            **gen_kwargs
-                        )
-                        audio_data = audio[0]
-                    else:
-                        audio = model_instance.generate(
-                            text=cau_co_moi,
-                            ref_audio=wav_sample,
-                            ref_text=req.ref_text
-                        )
-                        audio_data = audio[0]
-                        if req.speed and req.speed != 1.0:
-                            audio_data = librosa.effects.time_stretch(audio_data, rate=req.speed, n_fft=512)
+                    import numpy as np
+                    sub_sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+                    if not sub_sentences:
+                        sub_sentences = [text]
+                    
+                    sub_audios = []
+                    for sub_text in sub_sentences:
+                        # Chuẩn hóa dấu ba chấm (...) và ellipsis (…) thành dấu phẩy (,) để tránh model bỏ chữ/hallucinate
+                        sub_clean = sub_text.replace("…", ", ").replace("...", ", ")
+                        sub_clean = re.sub(r',\s*,', ',', sub_clean)
+                        sub_clean = re.sub(r'\s+', ' ', sub_clean).strip()
+                        if not sub_clean:
+                            continue
+                        
+                        if req.speed_method == "model":
+                            gen_kwargs = {}
+                            if req.speed and req.speed != 1.0:
+                                gen_kwargs["speed"] = req.speed
+                            audio = model_instance.generate(
+                                text=sub_clean,
+                                ref_audio=wav_sample,
+                                ref_text=req.ref_text,
+                                **gen_kwargs
+                            )
+                        else:
+                            audio = model_instance.generate(
+                                text=sub_clean,
+                                ref_audio=wav_sample,
+                                ref_text=req.ref_text
+                            )
+                        sub_audios.append(audio[0])
+                    
+                    if not sub_audios:
+                        return np.zeros(24000, dtype=np.float32)
+                    
+                    # Ghép các đoạn âm thanh lại với nhau, chèn khoảng lặng 0.3s giữa các câu
+                    silence_len = int(24000 * 0.3)
+                    silence = np.zeros(silence_len, dtype=np.float32)
+                    
+                    combined_segments = []
+                    for i, segment in enumerate(sub_audios):
+                        if i > 0:
+                            combined_segments.append(silence)
+                        combined_segments.append(segment)
+                        
+                    audio_data = np.concatenate(combined_segments)
+                    
+                    # Nếu dùng DSP-based speed, stretch toàn bộ audio sau khi ghép
+                    if req.speed_method != "model" and req.speed and req.speed != 1.0:
+                        audio_data = librosa.effects.time_stretch(audio_data, rate=req.speed, n_fft=512)
+                        
                     return audio_data
                 
                 try:
