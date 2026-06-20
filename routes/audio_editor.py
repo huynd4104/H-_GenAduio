@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import tempfile
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -74,10 +75,6 @@ async def stream_audio_file(id: str = Query(..., description="Internal ID of the
 
 @router.post("/api/audio-editor/export")
 async def export_audio(req: ExportRequest):
-    target_dir = os.path.abspath(req.folder)
-    if not os.path.exists(target_dir):
-        raise HTTPException(status_code=400, detail="Thư mục lưu kết quả không tồn tại")
-        
     if not req.clips:
         raise HTTPException(status_code=400, detail="Không có clip nào trong dòng thời gian")
         
@@ -93,8 +90,13 @@ async def export_audio(req: ExportRequest):
                 "trimEnd": clip.trimEnd
             })
             
-        output_wav = os.path.join(target_dir, "final_audio.wav")
-        output_mp3 = os.path.join(target_dir, "final_audio.mp3")
+        # Write to system temporary directory to prevent creating folders in the user's workspace
+        temp_export_dir = os.path.join(tempfile.gettempdir(), "genaudio_temp_exports")
+        os.makedirs(temp_export_dir, exist_ok=True)
+        
+        unique_prefix = str(uuid.uuid4())[:8]
+        output_wav = os.path.join(temp_export_dir, f"export_{unique_prefix}.wav")
+        output_mp3 = os.path.join(temp_export_dir, f"export_{unique_prefix}.mp3")
         
         merge_audio_clips(resolved_clips, output_wav, output_mp3)
         
@@ -226,3 +228,15 @@ async def browse_load_project():
             return {"path": None, "message": "User cancelled or error occurred."}
     except Exception as e:
         return {"path": None, "error": str(e)}
+
+@router.post("/api/audio-editor/open-temp-dir")
+async def open_temp_dir():
+    try:
+        temp_dir = os.path.join(tempfile.gettempdir(), "genaudio_temp_exports")
+        os.makedirs(temp_dir, exist_ok=True)
+        # On macOS, use the open command to bring up Finder
+        proc = await asyncio.create_subprocess_exec("open", temp_dir)
+        await proc.wait()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
