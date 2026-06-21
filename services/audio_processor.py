@@ -20,26 +20,51 @@ def get_audio_duration(file_path: str) -> float:
             return 0.0
 
 def merge_audio_clips(clips_data: list, output_wav: str, output_mp3: str):
-    """Trims, standardizes, and merges multiple audio clips using FFmpeg."""
+    """Trims, standardizes, and merges multiple audio clips using FFmpeg mixing."""
     if not clips_data:
         raise ValueError("No audio clips to merge.")
         
     inputs = []
     filter_parts = []
     
+    # Calculate total timeline duration of the export
+    total_duration = 0.1
+    for clip in clips_data:
+        clip_end = clip["timelineStart"] + (clip["sourceEnd"] - clip["sourceStart"])
+        if clip_end > total_duration:
+            total_duration = clip_end
+
     for idx, clip in enumerate(clips_data):
         file_path = clip["filePath"]
-        trim_start = clip["trimStart"]
-        trim_end = clip["trimEnd"]
-        duration = max(0.001, trim_end - trim_start) # avoid 0 or negative duration
+        timeline_start = clip["timelineStart"]
+        source_start = clip["sourceStart"]
+        source_end = clip["sourceEnd"]
+        volume = clip.get("volume", 1.0)
         
-        inputs.extend(["-ss", f"{trim_start:.3f}", "-t", f"{duration:.3f}", "-i", file_path])
-        filter_parts.append(f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{idx}]")
+        play_dur = max(0.001, source_end - source_start)
+        delay_ms = int(round(timeline_start * 1000))
         
-    concat_inputs = "".join(f"[a{idx}]" for idx in range(len(clips_data)))
-    concat_filter = f"{concat_inputs}concat=n={len(clips_data)}:v=0:a=1[outa]"
+        # Add input trimmed source clip
+        inputs.extend(["-ss", f"{source_start:.3f}", "-t", f"{play_dur:.3f}", "-i", file_path])
+        
+        # Build filter chain: resample -> volume -> adelay
+        filter_parts.append(
+            f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"volume={volume:.2f},adelay={delay_ms}|{delay_ms}[d{idx}]"
+        )
+        
+    # Append silence padding as the last input
+    silent_idx = len(clips_data)
+    inputs.extend(["-f", "lavfi", "-t", f"{total_duration:.3f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"])
     
-    filter_complex = "; ".join(filter_parts) + "; " + concat_filter
+    # Resample the silent input
+    filter_parts.append(f"[{silent_idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[d{silent_idx}]")
+    
+    # Mix delayed streams and the silence padding
+    mix_inputs = "".join(f"[d{i}]" for i in range(silent_idx + 1))
+    filter_parts.append(f"{mix_inputs}amix=inputs={silent_idx + 1}:duration=longest:normalize=0[outa]")
+    
+    filter_complex = "; ".join(filter_parts)
     
     # Run FFmpeg to output WAV
     cmd_wav = [

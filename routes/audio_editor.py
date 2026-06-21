@@ -17,8 +17,10 @@ audio_id_map: Dict[str, str] = {}
 
 class ClipInput(BaseModel):
     audioId: str
-    trimStart: float
-    trimEnd: float
+    timelineStart: float
+    sourceStart: float
+    sourceEnd: float
+    volume: float = 1.0
 
 class ExportRequest(BaseModel):
     folder: str
@@ -86,8 +88,10 @@ async def export_audio(req: ExportRequest):
                 raise HTTPException(status_code=400, detail=f"Không tìm thấy file cho clip ID: {clip.audioId}")
             resolved_clips.append({
                 "filePath": path,
-                "trimStart": clip.trimStart,
-                "trimEnd": clip.trimEnd
+                "timelineStart": clip.timelineStart,
+                "sourceStart": clip.sourceStart,
+                "sourceEnd": clip.sourceEnd,
+                "volume": clip.volume
             })
             
         # Write to system temporary directory to prevent creating folders in the user's workspace
@@ -112,6 +116,8 @@ async def export_audio(req: ExportRequest):
             "wav_url": f"/api/audio-editor/stream?id={wav_id}",
             "mp3_url": f"/api/audio-editor/stream?id={mp3_id}"
         }
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -127,9 +133,12 @@ async def save_project(req: SaveProjectRequest):
                 raise HTTPException(status_code=400, detail="ID âm thanh không hợp lệ")
             filename = os.path.basename(path)
             project_clips.append({
+                "audioId": clip.audioId,
                 "filename": filename,
-                "trimStart": clip.trimStart,
-                "trimEnd": clip.trimEnd
+                "timelineStart": clip.timelineStart,
+                "sourceStart": clip.sourceStart,
+                "sourceEnd": clip.sourceEnd,
+                "volume": clip.volume
             })
             
         project_data = {"clips": project_clips}
@@ -139,6 +148,8 @@ async def save_project(req: SaveProjectRequest):
             json.dump(project_data, f, ensure_ascii=False, indent=2)
             
         return {"success": True, "message": "Đã lưu dự án thành công!"}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -183,11 +194,15 @@ async def load_project(path: str = Query(..., description="Absolute path to proj
                     "audioId": audio_id,
                     "filename": fname,
                     "duration": dur,
-                    "trimStart": clip["trimStart"],
-                    "trimEnd": clip["trimEnd"]
+                    "timelineStart": clip.get("timelineStart", 0.0),
+                    "sourceStart": clip.get("sourceStart", 0.0),
+                    "sourceEnd": clip.get("sourceEnd", dur),
+                    "volume": clip.get("volume", 1.0)
                 })
                 
         return {"success": True, "clips": loaded_clips, "folder": target_dir}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
