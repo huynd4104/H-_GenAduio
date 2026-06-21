@@ -81,9 +81,15 @@ HTML_CONTENT = """
             padding: 0;
         }
 
+        html {
+            background: var(--bg-gradient) no-repeat center center fixed;
+            background-size: cover;
+            min-height: 100vh;
+        }
+
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            background: var(--bg-gradient);
+            background: transparent;
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
@@ -97,7 +103,7 @@ HTML_CONTENT = """
             width: 100% !important;
             max-width: 1200px;
             display: grid;
-            grid-template-columns: 1.2fr 0.8fr;
+            grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
             gap: 2rem;
             margin-top: 1.5rem;
         }
@@ -142,6 +148,7 @@ HTML_CONTENT = """
             flex-direction: column;
             gap: 1.5rem;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
+            min-width: 0;
         }
 
         .panel:hover {
@@ -183,7 +190,67 @@ HTML_CONTENT = """
 
         textarea {
             resize: vertical;
-            min-height: 120px;
+            min-height: 200px;
+        }
+
+        .sentences-container {
+            display: flex;
+            position: relative;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            overflow: hidden;
+            width: 100%;
+        }
+        .sentences-container:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+            background: rgba(15, 23, 42, 0.8);
+        }
+        .line-numbers {
+            width: 40px;
+            padding: 0.75rem 0.25rem 0.75rem 0;
+            background: rgba(15, 23, 42, 0.4);
+            border-right: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            font-family: monospace;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            text-align: right;
+            user-select: none;
+            overflow: hidden;
+            white-space: pre;
+        }
+        .sentences-textarea {
+            flex: 1 !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            padding: 0.75rem 1rem !important;
+            overflow-x: scroll !important;
+            white-space: pre !important;
+            overflow-wrap: normal !important;
+            word-wrap: normal !important;
+            word-break: keep-all !important;
+            margin: 0 !important;
+            line-height: 1.5 !important;
+        }
+        .sentences-textarea::-webkit-scrollbar {
+            height: 8px !important;
+            display: block !important;
+            cursor: default !important;
+        }
+        .sentences-textarea::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5) !important;
+            cursor: default !important;
+        }
+        .sentences-textarea::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.6) !important;
+            border-radius: 4px !important;
+            cursor: default !important;
         }
 
         .row {
@@ -505,15 +572,19 @@ HTML_CONTENT = """
             gap: 0.5rem;
             overflow-x: auto;
             flex: 1;
-            padding-bottom: 2px;
+            padding-bottom: 8px;
         }
 
         .tabs-headers::-webkit-scrollbar {
-            height: 4px;
+            height: 8px;
+        }
+        .tabs-headers::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 4px;
         }
         .tabs-headers::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 2px;
+            background: rgba(99, 102, 241, 0.4);
+            border-radius: 4px;
         }
 
         .tab-header-btn {
@@ -542,6 +613,12 @@ HTML_CONTENT = """
         .tab-header-btn:hover:not(.active) {
             background: rgba(255, 255, 255, 0.08);
             color: var(--text-primary);
+        }
+
+        .tab-header-btn.drag-over {
+            border: 2px dashed #6366f1 !important;
+            background: rgba(99, 102, 241, 0.15) !important;
+            transform: scale(1.02);
         }
 
         .tab-close-btn {
@@ -622,10 +699,9 @@ HTML_CONTENT = """
 <body>
     <header>
         <h1>Hẹ Hẹ hẹ</h1>
-        <p>Ứng dụng nhân bản giọng nói và tạo âm thanh hàng loạt trực quan</p>
         <div style="margin-top: 1rem; display: flex; justify-content: center; gap: 1rem;">
             <a href="/audio-editor" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; background: var(--accent); color: var(--text-primary); text-decoration: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; border: 1px solid var(--glass-border); transition: background 0.2s;" onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='var(--accent)'">
-                🎬 Trình ghép & Chỉnh sửa âm thanh (Audio Editor)
+                🎬 Audio Editor
             </a>
         </div>
     </header>
@@ -1039,11 +1115,79 @@ HTML_CONTENT = """
             const container = document.getElementById('tabs-headers');
             container.innerHTML = '';
             
-            tabs.forEach(tab => {
+            tabs.forEach((tab, index) => {
                 const btn = document.createElement('button');
                 btn.className = `tab-header-btn ${tab.id === activeTabId ? 'active' : ''}`;
                 btn.dataset.id = tab.id;
+                btn.draggable = true;
+                
                 btn.onclick = () => selectTab(tab.id);
+                
+                // Drag and Drop Tab Sorting
+                btn.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', tab.id);
+                    btn.style.opacity = '0.5';
+                });
+                
+                btn.addEventListener('dragend', () => {
+                    btn.style.opacity = '1';
+                    document.querySelectorAll('.tab-header-btn').forEach(b => b.classList.remove('drag-over'));
+                });
+                
+                btn.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                });
+
+                btn.addEventListener('dragenter', (e) => {
+                    e.preventDefault();
+                    const targetBtn = e.target.closest('.tab-header-btn');
+                    if (targetBtn) {
+                        targetBtn.classList.add('drag-over');
+                    }
+                });
+
+                btn.addEventListener('dragleave', (e) => {
+                    const targetBtn = e.target.closest('.tab-header-btn');
+                    if (targetBtn) {
+                        targetBtn.classList.remove('drag-over');
+                    }
+                });
+                
+                btn.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const targetBtn = e.target.closest('.tab-header-btn');
+                    if (targetBtn) {
+                        targetBtn.classList.remove('drag-over');
+                    }
+                    const draggedTabId = e.dataTransfer.getData('text/plain');
+                    if (draggedTabId === tab.id) return;
+                    
+                    const draggedIndex = tabs.findIndex(t => t.id === draggedTabId);
+                    const targetIndex = tabs.findIndex(t => t.id === tab.id);
+                    
+                    if (draggedIndex !== -1 && targetIndex !== -1) {
+                        // Move tab to new position
+                        const [draggedTab] = tabs.splice(draggedIndex, 1);
+                        tabs.splice(targetIndex, 0, draggedTab);
+                        
+                        // Update names sequentially
+                        tabs.forEach((t, idx) => {
+                            t.name = `Cửa sổ ${idx + 1}`;
+                        });
+                        
+                        saveAllTabs();
+                        renderTabHeaders();
+                        
+                        // Reorder DOM panels to match new tab order
+                        const wrapper = document.getElementById('tabs-container-wrapper');
+                        tabs.forEach(t => {
+                            const panel = document.getElementById(`panel-${t.id}`);
+                            if (panel) {
+                                wrapper.appendChild(panel);
+                            }
+                        });
+                    }
+                });
                 
                 const label = document.createElement('span');
                 label.textContent = tab.name;
@@ -1072,7 +1216,10 @@ HTML_CONTENT = """
                 <div class="panel">
                     <div class="form-group">
                         <label for="sentences-${tab.id}">Danh sách câu nói cần gen (Mỗi câu một dòng)</label>
-                        <textarea id="sentences-${tab.id}" class="sentences-textarea" placeholder="Ví dụ:&#10;Chưa đúng rồi, con chọn lại nhé.&#10;Tuyệt vời! Con giỏi quá.">${tab.sentences || ''}</textarea>
+                        <div class="sentences-container">
+                            <div id="line-numbers-${tab.id}" class="line-numbers">1</div>
+                            <textarea id="sentences-${tab.id}" class="sentences-textarea" wrap="off" placeholder="Ví dụ: Chưa đúng rồi, con chọn lại nhé. Tuyệt vời! Con giỏi quá.">${tab.sentences || ''}</textarea>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -1267,6 +1414,30 @@ HTML_CONTENT = """
             }
             
             updateTabSampleAudio(tabId, !!tab.refText);
+            updateTabLineNumbers(tabId);
+        }
+
+        function updateTabLineNumbers(tabId) {
+            const textarea = document.getElementById(`sentences-${tabId}`);
+            const lineNumbersDiv = document.getElementById(`line-numbers-${tabId}`);
+            if (!textarea || !lineNumbersDiv) return;
+            
+            const lines = textarea.value.split('\\n');
+            const totalLines = Math.max(1, lines.length);
+            let numbersHtml = '';
+            for (let i = 1; i <= totalLines; i++) {
+                numbersHtml += i + '\\n';
+            }
+            lineNumbersDiv.textContent = numbersHtml;
+            alignTabLineNumbersScroll(tabId);
+        }
+
+        function alignTabLineNumbersScroll(tabId) {
+            const textarea = document.getElementById(`sentences-${tabId}`);
+            const lineNumbersDiv = document.getElementById(`line-numbers-${tabId}`);
+            if (!textarea || !lineNumbersDiv) return;
+            
+            lineNumbersDiv.scrollTop = textarea.scrollTop;
         }
 
         function syncTabFolderSelect(tabId) {
@@ -1362,6 +1533,10 @@ HTML_CONTENT = """
                 tab.sentences = sentencesEl.value;
                 saveAllTabs();
                 syncTabCustomNumbers(tabId);
+                updateTabLineNumbers(tabId);
+            });
+            sentencesEl.addEventListener('scroll', () => {
+                alignTabLineNumbersScroll(tabId);
             });
             
             folderPathEl.addEventListener('change', () => {
