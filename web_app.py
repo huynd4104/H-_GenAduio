@@ -25,9 +25,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import unicodedata
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_NAME = "./khanhtts_model"
 model = None
+
+def normalize_path(path: str) -> str:
+    if not path:
+        return path
+    return unicodedata.normalize("NFC", os.path.abspath(path))
 
 def get_model():
     global model
@@ -87,7 +94,7 @@ HTML_CONTENT = """
         }
 
         .container {
-            width: 100%;
+            width: 100% !important;
             max-width: 1200px;
             display: grid;
             grid-template-columns: 1.2fr 0.8fr;
@@ -608,6 +615,7 @@ HTML_CONTENT = """
         
         .tab-content-panel.active {
             display: grid !important;
+            width: 100% !important;
         }
     </style>
 </head>
@@ -1239,9 +1247,11 @@ HTML_CONTENT = """
             syncTabFolderSelect(tabId);
             
             if (tab.selectedSample) {
-                let sampleExists = globalSamples.some(s => s.path === tab.selectedSample);
-                if (sampleExists) {
-                    sampleSelect.value = tab.selectedSample;
+                const normSelected = tab.selectedSample.normalize('NFC');
+                let foundSample = globalSamples.find(s => s.path.normalize('NFC') === normSelected);
+                if (foundSample) {
+                    sampleSelect.value = foundSample.path;
+                    tab.selectedSample = foundSample.path;
                 } else if (globalSamples.length > 0) {
                     sampleSelect.value = globalSamples[0].path;
                     tab.selectedSample = sampleSelect.value;
@@ -1465,10 +1475,23 @@ HTML_CONTENT = """
                                     sampleSelectOther.appendChild(opt);
                                 });
                                 if (t.id === tabId) {
-                                    sampleSelectOther.value = data.path;
-                                    tab.selectedSample = data.path;
+                                    const normPath = data.path.normalize('NFC');
+                                    const matchedSample = globalSamples.find(s => s.path.normalize('NFC') === normPath);
+                                    if (matchedSample) {
+                                        sampleSelectOther.value = matchedSample.path;
+                                        tab.selectedSample = matchedSample.path;
+                                    } else {
+                                        sampleSelectOther.value = data.path;
+                                        tab.selectedSample = data.path;
+                                    }
                                 } else {
-                                    sampleSelectOther.value = valBefore;
+                                    const normBefore = valBefore ? valBefore.normalize('NFC') : '';
+                                    const matchedBefore = globalSamples.find(s => s.path.normalize('NFC') === normBefore);
+                                    if (matchedBefore) {
+                                        sampleSelectOther.value = matchedBefore.path;
+                                    } else {
+                                        sampleSelectOther.value = valBefore;
+                                    }
                                 }
                             }
                         });
@@ -2076,7 +2099,7 @@ async def get_metadata():
         if os.path.isdir(full_path):
             folders.append({
                 "name": item,
-                "path": full_path
+                "path": normalize_path(full_path)
             })
             
             if item == "Kết quả":
@@ -2085,7 +2108,7 @@ async def get_metadata():
                     if os.path.isdir(sub_path) and not subitem.startswith("."):
                         folders.append({
                             "name": f"Kết quả / {subitem}",
-                            "path": sub_path
+                            "path": normalize_path(sub_path)
                         })
             
     sample_dir = os.path.join(BASE_DIR, "Audio sample")
@@ -2095,14 +2118,14 @@ async def get_metadata():
             if os.path.isfile(full_path) and (item.lower().endswith(".mp3") or item.lower().endswith(".wav")) and not item.startswith("temp_"):
                 samples.append({
                     "name": item,
-                    "path": full_path
+                    "path": normalize_path(full_path)
                 })
             
     folders.sort(key=lambda x: x["name"])
     samples.sort(key=lambda x: x["name"])
     
     return {
-        "base_dir": BASE_DIR,
+        "base_dir": normalize_path(BASE_DIR),
         "folders": folders,
         "samples": samples
     }
@@ -2118,7 +2141,7 @@ async def upload_sample(file: UploadFile = File(...)):
         content = await file.read()
         with open(target_path, "wb") as f:
             f.write(content)
-        return {"success": True, "name": filename, "path": target_path}
+        return {"success": True, "name": filename, "path": normalize_path(target_path)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -2127,7 +2150,7 @@ asr_loaded = False
 @app.post("/api/transcribe")
 async def transcribe_audio(payload: dict):
     global asr_loaded
-    audio_path = payload.get("path")
+    audio_path = normalize_path(payload.get("path")) if payload.get("path") else None
     if not audio_path or not os.path.exists(audio_path):
         raise HTTPException(status_code=400, detail="File not found")
     try:
@@ -2145,7 +2168,7 @@ async def transcribe_audio(payload: dict):
 
 @app.get("/api/files")
 async def get_files(folder: str):
-    target_dir = os.path.abspath(folder)
+    target_dir = normalize_path(folder)
     if not os.path.exists(target_dir):
         return {"files": []}
         
@@ -2156,7 +2179,7 @@ async def get_files(folder: str):
             if os.path.isfile(full_path) and item.lower().endswith(".wav") and not item.startswith("temp_"):
                 files.append({
                     "name": item,
-                    "path": full_path
+                    "path": normalize_path(full_path)
                 })
         files.sort(key=lambda x: x["name"])
         return {"files": files}
@@ -2165,7 +2188,7 @@ async def get_files(folder: str):
 
 @app.get("/api/audio")
 async def get_audio(path: str):
-    full_path = os.path.abspath(path)
+    full_path = normalize_path(path)
     if not (full_path.lower().endswith(".wav") or full_path.lower().endswith(".mp3")):
         raise HTTPException(status_code=403, detail="Format not allowed")
     if not os.path.exists(full_path):
@@ -2174,7 +2197,7 @@ async def get_audio(path: str):
 
 @app.delete("/api/delete-audio")
 async def delete_audio(path: str):
-    full_path = os.path.abspath(path)
+    full_path = normalize_path(path)
     if not (full_path.lower().endswith(".wav") or full_path.lower().endswith(".mp3")):
         raise HTTPException(status_code=403, detail="Format not allowed")
     if not os.path.exists(full_path):
@@ -2187,7 +2210,7 @@ async def delete_audio(path: str):
 
 @app.delete("/api/clear-all")
 async def clear_all(folder: str):
-    target_dir = os.path.abspath(folder)
+    target_dir = normalize_path(folder)
     if not os.path.exists(target_dir):
         raise HTTPException(status_code=404, detail="Directory not found")
     try:
@@ -2209,7 +2232,7 @@ class RenameRequest(BaseModel):
 
 @app.post("/api/rename-audio")
 async def rename_audio(req: RenameRequest):
-    old_path = os.path.abspath(req.path)
+    old_path = normalize_path(req.path)
     new_filename = req.new_name.strip()
     
     if not (old_path.lower().endswith(".wav") or old_path.lower().endswith(".mp3")):
@@ -2224,7 +2247,7 @@ async def rename_audio(req: RenameRequest):
         new_filename += ext
         
     parent_dir = os.path.dirname(old_path)
-    new_path = os.path.join(parent_dir, new_filename)
+    new_path = normalize_path(os.path.join(parent_dir, new_filename))
     
     if os.path.exists(new_path) and new_path != old_path:
         raise HTTPException(status_code=400, detail="File mới đã tồn tại")
@@ -2252,7 +2275,7 @@ async def generate_voice(req: GenerateRequest):
             yield json.dumps({"status": "model_loading"}) + "\n"
             model_instance = get_model()
             
-            ref_audio_path = os.path.abspath(req.ref_audio)
+            ref_audio_path = normalize_path(req.ref_audio)
             if not os.path.exists(ref_audio_path):
                 yield json.dumps({"status": "error", "message": f"Không tìm thấy file mẫu: {req.ref_audio}"}) + "\n"
                 return
